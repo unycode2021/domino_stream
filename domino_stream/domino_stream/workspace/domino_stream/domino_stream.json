@@ -1,0 +1,81 @@
+{
+ "charts": [],
+ "content": "[{\"id\":\"ds_hdr\",\"type\":\"header\",\"data\":{\"text\":\"<span class=\\\"h4\\\"><b>Domino Stream</b></span>\",\"col\":12}},{\"id\":\"ds_sc\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Domino Stream Console\",\"col\":4}},{\"id\":\"ds_sp\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"ds_card\",\"type\":\"card\",\"data\":{\"card_name\":\"Masters\",\"col\":4}}]",
+ "creation": "2026-09-24 00:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "video",
+ "idx": 0,
+ "is_hidden": 0,
+ "label": "Domino Stream",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Masters",
+   "link_count": 3,
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Stream Room",
+   "link_count": 0,
+   "link_to": "Stream Room",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Stream Event",
+   "link_count": 0,
+   "link_to": "Stream Event",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Stream Settings",
+   "link_count": 0,
+   "link_to": "Stream Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-09-24 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Domino Stream",
+ "name": "Domino Stream",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [
+  {
+   "role": "System Manager"
+  },
+  {
+   "role": "Domino Manager"
+  }
+ ],
+ "sequence_id": 25,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "label": "Domino Stream Console",
+   "type": "URL",
+   "url": "/domino-stream"
+  }
+ ],
+ "title": "Domino Stream"
+}

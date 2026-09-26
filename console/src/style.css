@@ -1,0 +1,35 @@
+:root {
+  color-scheme: light;
+  --bg: #0f1419;
+  --panel: #1a222c;
+  --panel-2: #232d3a;
+  --text: #e8eef4;
+  --muted: #8b9aab;
+  --accent: #3d9cf0;
+  --danger: #e85d5d;
+  --ok: #3dbf7a;
+  --warn: #e6a23c;
+  --border: #2c3848;
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+input,
+select {
+  font: inherit;
+}

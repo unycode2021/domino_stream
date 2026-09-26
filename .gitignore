@@ -1,0 +1,63 @@
+*.pyc
+*.py~
+*.DS_Store
+*.swp
+*.egg-info
+dist/
+.vscode
+.vs
+node_modules/
+*debug.log
+*.log
+
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+.Python
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg
+.installed.cfg
+MANIFEST
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Translations
+*.mo
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE / OS
+.idea/
+*.sublime-*
+.DS_Store
+Thumbs.db

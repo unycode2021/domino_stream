@@ -1,0 +1,86 @@
+{
+ "actions": [],
+ "autoname": "field:stage_name",
+ "creation": "2026-09-18 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "stage_name",
+  "enabled",
+  "stage_type",
+  "sort_order",
+  "column_break_1",
+  "config_json",
+  "description"
+ ],
+ "fields": [
+  {
+   "fieldname": "stage_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Stage Name",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Enabled"
+  },
+  {
+   "default": "passthrough",
+   "fieldname": "stage_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Stage Type",
+   "options": "passthrough\nai_worker"
+  },
+  {
+   "default": "100",
+   "fieldname": "sort_order",
+   "fieldtype": "Int",
+   "label": "Sort Order"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "JSON config for the stage (AI endpoint, model, etc.)",
+   "fieldname": "config_json",
+   "fieldtype": "Code",
+   "label": "Config JSON",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Domino Stream",
+ "name": "Stream Pipeline Stage",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "sort_order",
+ "sort_order": "ASC",
+ "states": []
+}

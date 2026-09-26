@@ -1,0 +1,182 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-09-18 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "table_id",
+  "status",
+  "column_break_1",
+  "publisher_session_id",
+  "publisher_user",
+  "section_tracks",
+  "video_track_id",
+  "audio_track_id",
+  "video_track_name",
+  "audio_track_name",
+  "video_mid",
+  "audio_mid",
+  "section_meta",
+  "www_notified_live",
+  "last_publisher_heartbeat",
+  "tracks_inactive_since",
+  "publisher_socket_present",
+  "section_kill_challenge",
+  "kill_challenge_id",
+  "kill_challenge_expires_at",
+  "kill_challenge_reason",
+  "last_error"
+ ],
+ "fields": [
+  {
+   "description": "Domino Competition Fixture Match Table name on www",
+   "fieldname": "table_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Table ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "default": "Idle",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Idle\nPreparing\nLive\nStopped\nError"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "publisher_session_id",
+   "fieldtype": "Data",
+   "label": "Publisher Session ID"
+  },
+  {
+   "fieldname": "publisher_user",
+   "fieldtype": "Data",
+   "label": "Publisher User"
+  },
+  {
+   "fieldname": "section_tracks",
+   "fieldtype": "Section Break",
+   "label": "Publisher Tracks"
+  },
+  {
+   "fieldname": "video_track_id",
+   "fieldtype": "Data",
+   "label": "Video Track ID"
+  },
+  {
+   "fieldname": "audio_track_id",
+   "fieldtype": "Data",
+   "label": "Audio Track ID"
+  },
+  {
+   "fieldname": "video_track_name",
+   "fieldtype": "Data",
+   "label": "Video Track Name"
+  },
+  {
+   "fieldname": "audio_track_name",
+   "fieldtype": "Data",
+   "label": "Audio Track Name"
+  },
+  {
+   "description": "SDP mid for publisher video track (required by Cloudflare tracks/close)",
+   "fieldname": "video_mid",
+   "fieldtype": "Data",
+   "label": "Video Mid"
+  },
+  {
+   "description": "SDP mid for publisher audio track (required by Cloudflare tracks/close)",
+   "fieldname": "audio_mid",
+   "fieldtype": "Data",
+   "label": "Audio Mid"
+  },
+  {
+   "fieldname": "section_meta",
+   "fieldtype": "Section Break",
+   "label": "Meta"
+  },
+  {
+   "default": "0",
+   "fieldname": "www_notified_live",
+   "fieldtype": "Check",
+   "label": "www Notified Live"
+  },
+  {
+   "description": "Updated by publisher_heartbeat and on publish_tracks. Used to detect crashed publishers.",
+   "fieldname": "last_publisher_heartbeat",
+   "fieldtype": "Datetime",
+   "label": "Last Publisher Heartbeat"
+  },
+  {
+   "description": "Set when GET session reports all local publisher tracks inactive; cleared when any are active.",
+   "fieldname": "tracks_inactive_since",
+   "fieldtype": "Datetime",
+   "label": "Tracks Inactive Since"
+  },
+  {
+   "default": "0",
+   "description": "1 while a publisher has joined publisher:{table_id} on the Domino Stream Socket.IO presence namespace. Cleared on leave/disconnect. Reconcile uses this to decide kill-challenge vs immediate stop.",
+   "fieldname": "publisher_socket_present",
+   "fieldtype": "Check",
+   "label": "Publisher Socket Present"
+  },
+  {
+   "fieldname": "section_kill_challenge",
+   "fieldtype": "Section Break",
+   "label": "Kill Challenge"
+  },
+  {
+   "description": "Active pre-stop challenge id; cleared on keep_alive or stop.",
+   "fieldname": "kill_challenge_id",
+   "fieldtype": "Data",
+   "label": "Kill Challenge ID"
+  },
+  {
+   "fieldname": "kill_challenge_expires_at",
+   "fieldtype": "Datetime",
+   "label": "Kill Challenge Expires At"
+  },
+  {
+   "fieldname": "kill_challenge_reason",
+   "fieldtype": "Small Text",
+   "label": "Kill Challenge Reason"
+  },
+  {
+   "fieldname": "last_error",
+   "fieldtype": "Small Text",
+   "label": "Last Error"
+  }
+ ],
+ "links": [],
+ "modified": "2026-09-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Domino Stream",
+ "name": "Stream Room",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "table_id",
+ "track_changes": 1
+}

@@ -1,0 +1,12 @@
+{
+  "name": "domino_stream",
+  "description": "Domino Stream control plane — Cloudflare Realtime SFU + publisher presence Socket.IO",
+  "private": true,
+  "license": "MIT",
+  "dependencies": {
+    "@redis/client": "^1.5.8",
+    "cookie": "^0.4.0",
+    "socket.io": "^4.7.1",
+    "superagent": "^8.0.0"
+  }
+}

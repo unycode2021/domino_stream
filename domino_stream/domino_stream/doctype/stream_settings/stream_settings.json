@@ -1,0 +1,141 @@
+{
+ "actions": [],
+ "creation": "2026-09-18 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "cloudflare_realtime_app_id",
+  "cloudflare_realtime_app_secret",
+  "section_www",
+  "www_site_url",
+  "www_api_key",
+  "www_webhook_url",
+  "section_liveness",
+  "publisher_heartbeat_grace_seconds",
+  "kill_challenge_grace_seconds",
+  "presence_socket_namespace",
+  "presence_socket_path",
+  "section_access",
+  "inbound_api_key",
+  "section_notes",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "Cloudflare Realtime (Calls) App ID. Never expose to browsers.",
+   "fieldname": "cloudflare_realtime_app_id",
+   "fieldtype": "Data",
+   "label": "Cloudflare Realtime App ID",
+   "reqd": 1
+  },
+  {
+   "description": "App Secret / Bearer token for rtc.live.cloudflare.com. Server-side only.",
+   "fieldname": "cloudflare_realtime_app_secret",
+   "fieldtype": "Password",
+   "label": "Cloudflare Realtime App Secret",
+   "reqd": 1
+  },
+  {
+   "fieldname": "section_www",
+   "fieldtype": "Section Break",
+   "label": "www Domino101 Live Now"
+  },
+  {
+   "description": "Use self when Domino Stream is installed on the same site as Domino101 Live Now (in-process start/stop, no HTTP). Otherwise the full base URL of remote www, e.g. https://www.domino101.com",
+   "fieldname": "www_site_url",
+   "fieldtype": "Data",
+   "label": "www Site URL"
+  },
+  {
+   "description": "Frappe API key pair api_key:api_secret for remote www start_stream / stop_stream. Not required when www Site URL is self.",
+   "fieldname": "www_api_key",
+   "fieldtype": "Password",
+   "label": "www API Key"
+  },
+  {
+   "description": "Optional Ant-parity guest webhook (default derived from www Site URL + streamer.hooks). POSTs liveStreamStarted/Ended with source=domino_stream.",
+   "fieldname": "www_webhook_url",
+   "fieldtype": "Data",
+   "label": "www Webhook URL"
+  },
+  {
+   "fieldname": "section_liveness",
+   "fieldtype": "Section Break",
+   "label": "Publisher Liveness"
+  },
+  {
+   "default": "35",
+   "description": "Seconds without publisher_heartbeat (or with inactive SFU tracks) before reconcile stops the room. Slightly above Cloudflare ~30s track timeout.",
+   "fieldname": "publisher_heartbeat_grace_seconds",
+   "fieldtype": "Int",
+   "label": "Publisher Heartbeat Grace (seconds)",
+   "non_negative": 1
+  },
+  {
+   "default": "150",
+   "description": "When a publisher socket is present, reconcile opens a kill challenge and waits this many seconds for keep_alive before stopping. If no socket is present, stop immediately (no wait).",
+   "fieldname": "kill_challenge_grace_seconds",
+   "fieldtype": "Int",
+   "label": "Kill Challenge Grace (seconds)",
+   "non_negative": 1
+  },
+  {
+   "default": "domino-stream",
+   "description": "Socket.IO namespace for publisher presence (Domino Stream Node process). Clients connect to /{namespace}.",
+   "fieldname": "presence_socket_namespace",
+   "fieldtype": "Data",
+   "label": "Presence Socket Namespace"
+  },
+  {
+   "default": "/domino-stream-socket.io",
+   "description": "Socket.IO engine path for Domino Stream presence (nginx must proxy this to domino_stream_io).",
+   "fieldname": "presence_socket_path",
+   "fieldtype": "Data",
+   "label": "Presence Socket Path"
+  },
+  {
+   "fieldname": "section_access",
+   "fieldtype": "Section Break",
+   "label": "Inbound Access"
+  },
+  {
+   "description": "Shared key DCMS/Connect/www send as X-Domino-Stream-Key (or Authorization Bearer)",
+   "fieldname": "inbound_api_key",
+   "fieldtype": "Password",
+   "label": "Inbound API Key"
+  },
+  {
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-09-18 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Domino Stream",
+ "name": "Stream Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
