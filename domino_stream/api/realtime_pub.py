@@ -17,23 +17,13 @@ PRESENCE_TOKEN_TTL_SECONDS = 60 * 60 * 24
 
 
 def get_presence_socket_namespace() -> str:
-	try:
-		settings = frappe.get_single("Stream Settings")
-		ns = (settings.get("presence_socket_namespace") or "").strip().lstrip("/")
-		return ns or DEFAULT_PRESENCE_NAMESPACE
-	except Exception:
-		return DEFAULT_PRESENCE_NAMESPACE
+	"""Namespace the Domino Stream socket process actually serves."""
+	return DEFAULT_PRESENCE_NAMESPACE
 
 
 def get_presence_socket_path() -> str:
-	try:
-		settings = frappe.get_single("Stream Settings")
-		path = (settings.get("presence_socket_path") or "").strip()
-		if path and not path.startswith("/"):
-			path = "/" + path
-		return path or DEFAULT_PRESENCE_SOCKET_PATH
-	except Exception:
-		return DEFAULT_PRESENCE_SOCKET_PATH
+	"""Engine path the Domino Stream socket process actually serves."""
+	return DEFAULT_PRESENCE_SOCKET_PATH
 
 
 def publisher_room_id(table_id: str) -> str:

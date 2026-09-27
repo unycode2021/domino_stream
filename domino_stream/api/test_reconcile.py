@@ -395,6 +395,159 @@ class TestGetSessionMissingStatuses(FrappeTestCase):
 		self.assertTrue(payload.get("_missing"))
 		self.assertEqual(payload.get("_http_status"), 404)
 
+	@patch("domino_stream.api.sfu_client.requests.get")
+	@patch("domino_stream.api.sfu_client.get_sfu_credentials")
+	def test_425_is_returned_not_thrown(self, mock_creds, mock_get):
+		from domino_stream.api.sfu_client import get_session
+		from domino_stream.api.session_health import classify_session_payload
+
+		mock_creds.return_value = {
+			"app_id": "app",
+			"app_secret": "sec",
+			"configured": True,
+		}
+		resp = mock_get.return_value
+		resp.status_code = 425
+		resp.content = b'{"errorCode":"session_error","errorDescription":"not connected"}'
+		resp.json.return_value = {
+			"errorCode": "session_error",
+			"errorDescription": "not connected",
+		}
+		payload = get_session("sess-setup")
+		self.assertFalse(payload.get("_missing"))
+		self.assertEqual(payload.get("_http_status"), 425)
+		obs = classify_session_payload(payload, "sess-setup")
+		self.assertEqual(obs["classification"], "setting_up")
+
+
+class TestClassifySessionPayload(FrappeTestCase):
+	def test_410_session_error_is_terminal(self):
+		from domino_stream.api.session_health import (
+			classify_session_payload,
+			kill_reason_for_observation,
+		)
+
+		obs = classify_session_payload(
+			{
+				"_http_status": 410,
+				"_error": {
+					"errorCode": "session_error",
+					"errorDescription": "Session appears to be disconnected",
+				},
+			},
+			"sess-1",
+		)
+		self.assertEqual(obs["classification"], "terminal")
+		self.assertEqual(obs["error_code"], "session_error")
+		self.assertEqual(kill_reason_for_observation(obs), "sfu_session_disconnected")
+		self.assertNotIn("sdp", obs)
+
+	def test_404_reason_is_not_found(self):
+		from domino_stream.api.session_health import (
+			classify_session_payload,
+			kill_reason_for_observation,
+		)
+
+		obs = classify_session_payload({"_http_status": 404, "_missing": True}, "sess-1")
+		self.assertEqual(obs["classification"], "terminal")
+		self.assertEqual(kill_reason_for_observation(obs), "sfu_session_not_found")
+
+	def test_active_local_track_is_alive(self):
+		from domino_stream.api.session_health import (
+			classify_session_payload,
+			kill_reason_for_observation,
+		)
+
+		obs = classify_session_payload(
+			{
+				"_http_status": 200,
+				"tracks": [{"location": "local", "status": "active", "mid": "0"}],
+			},
+			"sess-1",
+		)
+		self.assertEqual(obs["classification"], "alive")
+		self.assertIsNone(kill_reason_for_observation(obs))
+
+	def test_inactive_local_tracks(self):
+		from domino_stream.api.session_health import (
+			classify_session_payload,
+			kill_reason_for_observation,
+		)
+
+		obs = classify_session_payload(
+			{
+				"_http_status": 200,
+				"tracks": [
+					{"location": "local", "status": "inactive", "mid": "0"},
+					{"location": "local", "status": "closed", "mid": "1", "errorCode": "close_track_error"},
+				],
+			},
+			"sess-1",
+		)
+		self.assertEqual(obs["classification"], "tracks_inactive")
+		self.assertEqual(kill_reason_for_observation(obs), "sfu_tracks_inactive")
+		self.assertEqual(obs["tracks"][1]["error_code"], "close_track_error")
+
+	def test_no_location_inactive_is_indeterminate(self):
+		from domino_stream.api.session_health import classify_session_payload
+
+		obs = classify_session_payload(
+			{"_http_status": 200, "tracks": [{"status": "inactive", "mid": "0"}]},
+			"sess-1",
+		)
+		self.assertEqual(obs["classification"], "indeterminate")
+
+	def test_server_error_is_indeterminate(self):
+		from domino_stream.api.session_health import (
+			classify_session_payload,
+			kill_reason_for_observation,
+		)
+
+		obs = classify_session_payload(
+			{
+				"_http_status": 503,
+				"errorCode": "temporarily_unavailable_error",
+				"errorDescription": "try later",
+			},
+			"sess-1",
+		)
+		self.assertEqual(obs["classification"], "indeterminate")
+		self.assertIsNone(kill_reason_for_observation(obs))
+
+
+class TestGraceReadsSettings(FrappeTestCase):
+	def test_saved_values_are_not_floored_or_capped(self):
+		from domino_stream.api.room import (
+			get_heartbeat_grace_seconds,
+			get_kill_challenge_grace_seconds,
+		)
+
+		settings = frappe._dict(
+			kill_challenge_grace_seconds=20,
+			publisher_heartbeat_grace_seconds=12,
+		)
+		with patch("domino_stream.api.room.frappe.get_single", return_value=settings):
+			self.assertEqual(get_kill_challenge_grace_seconds(), 20)
+			self.assertEqual(get_heartbeat_grace_seconds(), 12)
+
+		settings.kill_challenge_grace_seconds = 45
+		with patch("domino_stream.api.room.frappe.get_single", return_value=settings):
+			self.assertEqual(get_kill_challenge_grace_seconds(), 45)
+
+	def test_empty_settings_use_defaults(self):
+		from domino_stream.api.room import (
+			get_heartbeat_grace_seconds,
+			get_kill_challenge_grace_seconds,
+		)
+
+		settings = frappe._dict(
+			kill_challenge_grace_seconds=None,
+			publisher_heartbeat_grace_seconds="",
+		)
+		with patch("domino_stream.api.room.frappe.get_single", return_value=settings):
+			self.assertEqual(get_kill_challenge_grace_seconds(), 20)
+			self.assertEqual(get_heartbeat_grace_seconds(), 35)
+
 
 class TestKillChallengeSelfEnforce(FrappeTestCase):
 	def setUp(self):

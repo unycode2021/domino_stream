@@ -98,6 +98,14 @@ function fmtAge(sec) {
   return `${Math.round(sec / 60)}m`;
 }
 
+function sfuChip(row) {
+  const obs = row?.sfu_observation;
+  if (!obs) return "";
+  const http = obs.http_status != null ? String(obs.http_status) : "";
+  const code = obs.error_code || obs.classification || "";
+  return `${http} ${code}`.trim();
+}
+
 function sevClass(sev) {
   if (sev === "Error") return "sev-error";
   if (sev === "Warning") return "sev-warn";
@@ -193,6 +201,7 @@ onUnmounted(() => {
               <tr>
                 <th>Table</th>
                 <th>Status</th>
+                <th>SFU</th>
                 <th>HB age</th>
                 <th></th>
               </tr>
@@ -212,6 +221,15 @@ onUnmounted(() => {
                   <span class="pill" :data-status="r.status">{{ r.status }}</span>
                 </td>
                 <td>
+                  <span
+                    v-if="sfuChip(r)"
+                    class="pill sfu-chip"
+                    :data-class="r.sfu_observation?.classification"
+                    >{{ sfuChip(r) }}</span
+                  >
+                  <span v-else class="muted">—</span>
+                </td>
+                <td>
                   <span :class="{ stale: r.status === 'Live' && !r.heartbeat_fresh }">
                     {{ fmtAge(r.hb_age_s) }}
                   </span>
@@ -229,7 +247,7 @@ onUnmounted(() => {
                 </td>
               </tr>
               <tr v-if="!rooms.length">
-                <td colspan="4" class="muted">No rooms</td>
+                <td colspan="5" class="muted">No rooms</td>
               </tr>
             </tbody>
           </table>
@@ -253,7 +271,24 @@ onUnmounted(() => {
             ><strong class="mono tiny">{{ selected.publisher_session_id || "—" }}</strong>
           </div>
           <div class="kv">
-            <span>SFU verdict</span><strong>{{ selected.session_verdict }}</strong>
+            <span>SFU</span>
+            <strong>{{ selected.sfu_observation?.classification || selected.session_verdict || "—" }}</strong>
+          </div>
+          <div class="kv">
+            <span>HTTP</span>
+            <strong>{{ selected.sfu_observation?.http_status ?? "—" }}</strong>
+          </div>
+          <div class="kv">
+            <span>errorCode</span>
+            <strong class="mono tiny">{{ selected.sfu_observation?.error_code || "—" }}</strong>
+          </div>
+          <div class="kv block">
+            <span>errorDescription</span>
+            <pre>{{ selected.sfu_observation?.error_description || "—" }}</pre>
+          </div>
+          <div class="kv">
+            <span>Action</span>
+            <strong>{{ selected.observation_action || "—" }}</strong>
           </div>
           <div class="kv">
             <span>HB age</span><strong>{{ fmtAge(selected.hb_age_s) }}</strong>
@@ -269,10 +304,29 @@ onUnmounted(() => {
             <span>Last error</span>
             <pre>{{ selected.last_error || "—" }}</pre>
           </div>
-          <div class="kv block">
-            <span>SFU session</span>
-            <pre>{{ JSON.stringify(selected.sfu_session, null, 2) }}</pre>
+          <div v-if="selected.sfu_observation?.tracks?.length" class="kv block">
+            <span>SFU tracks</span>
+            <table class="tracks">
+              <thead>
+                <tr>
+                  <th>mid</th>
+                  <th>status</th>
+                  <th>error</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(t, i) in selected.sfu_observation.tracks" :key="i">
+                  <td class="mono">{{ t.mid ?? "—" }}</td>
+                  <td>{{ t.status || "—" }}</td>
+                  <td class="mono tiny">{{ t.error_code || "—" }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
+          <details class="raw">
+            <summary>SFU observation JSON</summary>
+            <pre>{{ JSON.stringify(selected.sfu_observation || selected.sfu_session, null, 2) }}</pre>
+          </details>
           <button
             v-if="selected.status === 'Live'"
             type="button"
@@ -430,6 +484,29 @@ h1 {
 .chip.accent {
   border-color: #2a5578;
   color: var(--accent);
+}
+.pill.sfu-chip[data-class="terminal"],
+.pill.sfu-chip[data-class="tracks_inactive"] {
+  color: var(--danger);
+}
+.tracks {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.tracks th,
+.tracks td {
+  text-align: left;
+  padding: 0.25rem 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+.raw {
+  margin: 0.75rem 0 1rem;
+}
+.raw summary {
+  cursor: pointer;
+  color: var(--muted, #9aa4b2);
+  margin-bottom: 0.35rem;
 }
 .grid {
   display: grid;

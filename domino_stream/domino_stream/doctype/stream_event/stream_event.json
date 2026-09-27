@@ -20,7 +20,7 @@
    "in_list_view": 1,
    "in_standard_filter": 1,
    "label": "Event Type",
-   "options": "stop\npublish\nheartbeat\nreconcile\nsfu_error\nchallenge\nkeep_alive\npresence\nconsole",
+   "options": "stop\npublish\nheartbeat\nreconcile\nsfu_error\nsfu_observation\nchallenge\nkeep_alive\npresence\nconsole",
    "reqd": 1
   },
   {

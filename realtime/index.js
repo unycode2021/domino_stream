@@ -9,6 +9,8 @@ const SOCKET_NAMESPACE = "domino-stream";
 
 const io = new Server({
 	path: SOCKET_PATH,
+	pingInterval: 10000,
+	pingTimeout: 10000,
 	cors: {
 		origin: true,
 		credentials: true,

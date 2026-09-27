@@ -18,12 +18,35 @@ function publisher_room_id(tableId) {
 	return `${PUBLISHER_ROOM_PREFIX}${tableId}`;
 }
 
+function http_fail_detail(err, res) {
+	const status = (res && res.status) || (err && err.status) || null;
+	let bodySnippet = "";
+	try {
+		const raw =
+			(res && res.text) ||
+			(res && res.body && JSON.stringify(res.body)) ||
+			(err && err.response && err.response.text) ||
+			"";
+		bodySnippet = String(raw).slice(0, 200);
+	} catch (_e) {
+		bodySnippet = "";
+	}
+	return { status, bodySnippet, message: (err && err.message) || "" };
+}
+
 function call_heartbeat(socket, tableId, sessionId) {
 	const body = { table_id: tableId, via: "socket" };
 	if (sessionId) body.session_id = sessionId;
 	stream_post(HB_METHOD, socket, body).end((err, res) => {
 		if (err || !res || res.status >= 400) {
-			log("stream publisher heartbeat failed", tableId, err && err.message);
+			const d = http_fail_detail(err, res);
+			log(
+				"stream publisher heartbeat failed",
+				tableId,
+				d.status,
+				d.message,
+				d.bodySnippet
+			);
 		}
 	});
 }
@@ -32,7 +55,14 @@ function call_presence_offline(socket, tableId) {
 	if (!tableId) return;
 	stream_post(OFFLINE_METHOD, socket, { table_id: tableId }).end((err, res) => {
 		if (err || !res || res.status >= 400) {
-			log("stream publisher presence offline failed", tableId, err && err.message);
+			const d = http_fail_detail(err, res);
+			log(
+				"stream publisher presence offline failed",
+				tableId,
+				d.status,
+				d.message,
+				d.bodySnippet
+			);
 		}
 	});
 }
@@ -100,7 +130,14 @@ function presence_handlers(_nsp, socket) {
 		if (sid) body.session_id = sid;
 		stream_post(KEEP_ALIVE_METHOD, socket, body).end((err, res) => {
 			if (err || !res || res.status >= 400) {
-				log("stream keep_alive failed", tid, err && err.message);
+				const d = http_fail_detail(err, res);
+				log(
+					"stream keep_alive failed",
+					tid,
+					d.status,
+					d.message,
+					d.bodySnippet
+				);
 				socket.emit(KEEP_ALIVE_OK_EVENT, {
 					table_id: tid,
 					challenge_id,

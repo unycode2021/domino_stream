@@ -12,7 +12,8 @@ With a fresh heartbeat, inactive SFU tracks still accumulate ``tracks_inactive_s
 and stop after grace (crashed-but-still-pinging edge case).
 
 When a publisher socket is present (``publisher_socket_present``), reconcile opens a
-**kill challenge** instead of stopping immediately - the client gets ~150s to
+**kill challenge** instead of stopping immediately - the client gets the
+Stream Settings kill-challenge grace (default 20s) to
 ``keep_alive``. If no socket is present, stop immediately.
 """
 

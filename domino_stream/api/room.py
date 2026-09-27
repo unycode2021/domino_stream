@@ -13,14 +13,19 @@ from frappe.utils import cint, get_datetime, now_datetime, time_diff_in_seconds
 
 from domino_stream.api.auth import require_stream_access
 from domino_stream.api import live_now, pipeline, sfu_client
-from domino_stream.api.session_health import session_verdict_label
+from domino_stream.api.session_health import (
+	kill_reason_for_observation,
+	observation_action,
+	observe_session,
+	session_verdict_label,
+)
 from domino_stream.api.realtime_pub import (
 	issue_presence_token,
 	presence_socket_client_info,
 )
 
 DEFAULT_HEARTBEAT_GRACE_SECONDS = 35
-DEFAULT_KILL_CHALLENGE_GRACE_SECONDS = 150
+DEFAULT_KILL_CHALLENGE_GRACE_SECONDS = 20
 
 stop_logger = frappe.logger("domino_stream_stop", allow_site=True, file_count=20)
 
@@ -64,25 +69,26 @@ def _upsert_participant(room_name: str, role: str, session_id: str, user: str | 
 	return doc.name
 
 
-def get_heartbeat_grace_seconds() -> int:
-	"""Grace window before a Live room is treated as abandoned."""
+def _settings_int(fieldname: str, default: int) -> int:
+	"""Saved Stream Settings value. Empty falls back to ``default``. No code floor."""
 	try:
 		settings = frappe.get_single("Stream Settings")
-		return max(5, cint(settings.get("publisher_heartbeat_grace_seconds") or DEFAULT_HEARTBEAT_GRACE_SECONDS))
+		raw = settings.get(fieldname)
+		if raw is None or raw == "":
+			return default
+		return cint(raw)
 	except Exception:
-		return DEFAULT_HEARTBEAT_GRACE_SECONDS
+		return default
+
+
+def get_heartbeat_grace_seconds() -> int:
+	"""Seconds without a publisher heartbeat before it counts as stale."""
+	return _settings_int("publisher_heartbeat_grace_seconds", DEFAULT_HEARTBEAT_GRACE_SECONDS)
 
 
 def get_kill_challenge_grace_seconds() -> int:
-	"""Seconds to wait for keep_alive when a publisher socket is present."""
-	try:
-		settings = frappe.get_single("Stream Settings")
-		return max(
-			30,
-			cint(settings.get("kill_challenge_grace_seconds") or DEFAULT_KILL_CHALLENGE_GRACE_SECONDS),
-		)
-	except Exception:
-		return DEFAULT_KILL_CHALLENGE_GRACE_SECONDS
+	"""Seconds to wait for keep_alive after a kill challenge opens."""
+	return _settings_int("kill_challenge_grace_seconds", DEFAULT_KILL_CHALLENGE_GRACE_SECONDS)
 
 
 def publisher_room_id(table_id: str) -> str:
@@ -519,6 +525,122 @@ def publisher_heartbeat(table_id: str, session_id: str = None, via: str = None):
 	}
 
 
+def _challenge_is_pending(room) -> bool:
+	if isinstance(room, dict):
+		challenge_id = room.get("kill_challenge_id")
+		expires_at = room.get("kill_challenge_expires_at")
+	else:
+		challenge_id = getattr(room, "kill_challenge_id", None)
+		expires_at = getattr(room, "kill_challenge_expires_at", None)
+	if not challenge_id or not expires_at:
+		return False
+	return now_datetime() < get_datetime(expires_at)
+
+
+def _emit_sfu_observation(table_id: str, room_name: str | None, observation: dict, connection_state: str | None = None):
+	"""Stream Event with status, code, and description. No SDP or secrets."""
+	try:
+		from domino_stream.api.events import emit_stream_event
+
+		detail = {
+			"http_status": observation.get("http_status"),
+			"error_code": observation.get("error_code"),
+			"error_description": observation.get("error_description"),
+			"session_id": observation.get("session_id"),
+			"classification": observation.get("classification"),
+			"table_id": table_id,
+		}
+		if connection_state:
+			detail["connection_state"] = str(connection_state)[:40]
+		classification = observation.get("classification") or "indeterminate"
+		severity = "Warning" if classification in ("terminal", "tracks_inactive") else "Info"
+		code = observation.get("error_code") or ""
+		emit_stream_event(
+			"sfu_observation",
+			f"SFU {classification} {table_id} HTTP {observation.get('http_status')} {code}".strip(),
+			table_id=table_id,
+			room=room_name,
+			severity=severity,
+			detail=detail,
+		)
+	except Exception:
+		pass
+
+
+def maybe_open_kill_from_observation(room, observation: dict):
+	"""Open a kill challenge for a terminal or tracks-inactive observation.
+
+	Does not reset a challenge that is already pending. Alive, setting_up,
+	and indeterminate observations do not arm.
+	"""
+	reason = kill_reason_for_observation(observation)
+	if not reason:
+		return None
+	status = room.get("status") if isinstance(room, dict) else getattr(room, "status", None)
+	if status != "Live":
+		return None
+	if _challenge_is_pending(room):
+		return None
+	return open_kill_challenge(room, reason)
+
+
+def _load_room_for_observe(table_id: str):
+	return frappe.db.get_value(
+		"Stream Room",
+		{"table_id": table_id},
+		[
+			"name",
+			"status",
+			"table_id",
+			"publisher_session_id",
+			"kill_challenge_id",
+			"kill_challenge_expires_at",
+		],
+		as_dict=True,
+	)
+
+
+@frappe.whitelist(allow_guest=True)
+def observe_publisher_session(table_id: str, connection_state: str = None):
+	"""Classify the publisher SFU session and arm a kill challenge when terminal.
+
+	Called when the publisher PeerConnection reports failed or disconnected.
+	A brief disconnect that Cloudflare still shows as alive does not arm.
+	"""
+	require_stream_access()
+	if not table_id:
+		frappe.throw(_("table_id is required"))
+
+	room = _load_room_for_observe(table_id)
+	if not room:
+		return {
+			"success": True,
+			"table_id": table_id,
+			"observation": None,
+			"challenge_opened": False,
+			"action": "not armed: no room",
+		}
+
+	observation = observe_session(room.publisher_session_id)
+	_emit_sfu_observation(table_id, room.name, observation, connection_state)
+	pending = _challenge_is_pending(room)
+	challenge = maybe_open_kill_from_observation(room, observation)
+	return {
+		"success": True,
+		"table_id": table_id,
+		"connection_state": connection_state,
+		"observation": observation,
+		"challenge_opened": bool(challenge),
+		"challenge_pending": pending,
+		"challenge": challenge,
+		"action": observation_action(
+			observation,
+			challenge_opened=bool(challenge),
+			challenge_pending=pending or bool(challenge),
+		),
+	}
+
+
 @frappe.whitelist(allow_guest=True)
 def publisher_presence_offline(table_id: str):
 	"""Clear socket-present on leave/disconnect and arm force-kill if Live.
@@ -530,18 +652,7 @@ def publisher_presence_offline(table_id: str):
 	if not table_id:
 		frappe.throw(_("table_id is required"))
 
-	room = frappe.db.get_value(
-		"Stream Room",
-		{"table_id": table_id},
-		[
-			"name",
-			"status",
-			"table_id",
-			"kill_challenge_id",
-			"kill_challenge_expires_at",
-		],
-		as_dict=True,
-	)
+	room = _load_room_for_observe(table_id)
 	if not room:
 		return {"success": True, "table_id": table_id, "cleared": False}
 
@@ -563,7 +674,15 @@ def publisher_presence_offline(table_id: str):
 			# Do not reset the clock on duplicate offline
 			frappe.db.commit()
 		else:
-			challenge_payload = open_kill_challenge(room, "publisher_socket_gone")
+			reason = "publisher_socket_gone"
+			if room.publisher_session_id:
+				observation = observe_session(room.publisher_session_id)
+				_emit_sfu_observation(table_id, room.name, observation)
+				# Terminal confirms the reason. Indeterminate does not cancel
+				# the challenge — the publisher socket really left.
+				if observation.get("classification") == "terminal":
+					reason = kill_reason_for_observation(observation) or reason
+			challenge_payload = open_kill_challenge(room, reason)
 			challenge_opened = True
 	else:
 		frappe.db.commit()

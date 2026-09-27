@@ -125,11 +125,13 @@ def close_tracks(session_id: str, tracks: list | None = None, force: bool = True
 	return _request("PUT", f"/sessions/{session_id}/tracks/close", body)
 
 
-def get_session(session_id: str) -> dict:
-	"""GET /sessions/{id}. Missing/disconnected sessions return ``_missing``.
+def get_session(session_id: str, timeout: int = 30) -> dict:
+	"""GET /sessions/{id}.
 
-	Cloudflare returns **404** when unknown and **410** when the PeerConnection
-	has disconnected — both mean the publisher session is gone for stop health.
+	404 and 410 return ``_missing`` (session unknown or PeerConnection disconnected).
+	Other HTTP errors are returned with ``_http_status`` and ``_error`` so callers
+	can classify them (425 setting up, 5xx indeterminate) instead of treating
+	every failure as a dead session. Network failures still raise.
 	"""
 	creds = get_sfu_credentials()
 	if not creds["configured"]:
@@ -142,16 +144,18 @@ def get_session(session_id: str) -> dict:
 	url = _url(creds["app_id"], f"/sessions/{session_id}")
 	try:
 		response = requests.get(
-			url, headers=_headers(creds["app_secret"]), timeout=30
+			url, headers=_headers(creds["app_secret"]), timeout=timeout
 		)
 	except requests.RequestException as e:
-		logger.error(f"SFU get_session failed {session_id}: {e}")
-		frappe.throw(_("SFU request failed: {0}").format(str(e)))
+		logger.error("SFU get_session failed %s: %s", session_id, type(e).__name__)
+		frappe.throw(_("SFU request failed"))
 
 	try:
 		data = response.json() if response.content else {}
 	except Exception:
-		data = {"raw": response.text}
+		data = {}
+	if not isinstance(data, dict):
+		data = {}
 
 	if response.status_code in (404, 410):
 		return {
@@ -159,12 +163,18 @@ def get_session(session_id: str) -> dict:
 			"tracks": [],
 			"_http_status": response.status_code,
 			"_error": data,
+			"errorCode": data.get("errorCode"),
+			"errorDescription": data.get("errorDescription"),
 		}
 	if response.status_code >= 400:
-		logger.error(f"SFU error {response.status_code} GET session {session_id}: {data}")
-		frappe.throw(
-			_("SFU API error {0}: {1}").format(response.status_code, data)
-		)
+		logger.error("SFU error %s GET session %s", response.status_code, session_id)
+		return {
+			"tracks": data.get("tracks") or [],
+			"_http_status": response.status_code,
+			"_error": data,
+			"errorCode": data.get("errorCode"),
+			"errorDescription": data.get("errorDescription"),
+		}
 	data["_http_status"] = response.status_code
 	return data
 

@@ -9,14 +9,17 @@ from frappe.utils import cint
 from domino_stream.api.auth import require_console_access
 from domino_stream.api.events import emit_stream_event
 from domino_stream.api.room import (
+	_challenge_is_pending,
+	_emit_sfu_observation,
 	_heartbeat_age_seconds,
 	_stop_room_internal,
 	get_heartbeat_grace_seconds,
 	get_kill_challenge_grace_seconds,
+	maybe_open_kill_from_observation,
 	publisher_heartbeat_fresh,
 )
 from domino_stream.api import sfu_client
-from domino_stream.api.session_health import session_verdict_label
+from domino_stream.api.session_health import observation_action, observe_session
 from domino_stream.install import RECONCILE_METHOD
 
 
@@ -43,7 +46,28 @@ def _room_row_payload(row) -> dict:
 		"tracks_inactive_since": str(row.tracks_inactive_since)
 		if row.tracks_inactive_since
 		else None,
+		"sfu_observation": None,
+		"observation_action": None,
 	}
+
+
+def _probe_live_session(row, payload, *, timeout: int = 5) -> dict:
+	"""Classify a Live publisher session and arm a kill challenge when terminal."""
+	if row.status != "Live" or not row.publisher_session_id:
+		return payload
+	observation = observe_session(row.publisher_session_id, timeout=timeout)
+	pending = _challenge_is_pending(row)
+	challenge = maybe_open_kill_from_observation(row, observation)
+	if challenge:
+		_emit_sfu_observation(row.table_id, row.name, observation)
+	payload["sfu_observation"] = observation
+	payload["session_verdict"] = observation.get("classification")
+	payload["observation_action"] = observation_action(
+		observation,
+		challenge_opened=bool(challenge),
+		challenge_pending=pending or bool(challenge),
+	)
+	return payload
 
 
 @frappe.whitelist()
@@ -71,12 +95,19 @@ def list_rooms(status: str = None, limit: int = 50):
 			"last_error",
 			"modified",
 			"tracks_inactive_since",
+			"kill_challenge_id",
+			"kill_challenge_expires_at",
 		],
 		order_by="modified desc",
 		limit_page_length=limit,
 	)
+	rooms = []
+	for row in rows:
+		payload = _room_row_payload(row)
+		_probe_live_session(row, payload)
+		rooms.append(payload)
 	return {
-		"rooms": [_room_row_payload(r) for r in rows],
+		"rooms": rooms,
 		"grace_seconds": get_heartbeat_grace_seconds(),
 	}
 
@@ -108,6 +139,8 @@ def get_room(table_id: str = None, name: str = None):
 			"modified",
 			"tracks_inactive_since",
 			"www_notified_live",
+			"kill_challenge_id",
+			"kill_challenge_expires_at",
 		],
 		as_dict=True,
 	)
@@ -128,15 +161,8 @@ def get_room(table_id: str = None, name: str = None):
 	)
 	payload["participants"] = participants
 
-	sfu = None
-	verdict = session_verdict_label(row.publisher_session_id)
-	payload["session_verdict"] = verdict
-	if row.publisher_session_id:
-		try:
-			sfu = sfu_client.get_session(row.publisher_session_id)
-		except Exception as e:
-			sfu = {"error": str(e)}
-	payload["sfu_session"] = sfu
+	_probe_live_session(row, payload, timeout=15)
+	payload["sfu_session"] = payload.get("sfu_observation")
 	return payload
 
 

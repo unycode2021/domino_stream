@@ -22,11 +22,32 @@ def main() -> int:
 	if bench_root not in sys.path:
 		sys.path.insert(0, bench_root)
 
+	sites_path = os.path.join(bench_root, "sites")
+	# Frappe resolves apps.txt / site configs relative to sites_path.
+	os.chdir(sites_path)
+
 	import frappe
 	from frappe.utils.background_jobs import get_queue_list, get_redis_conn
 	from rq.scheduler import RQScheduler
 
-	with frappe.init_site():
+	site = (
+		os.environ.get("FRAPPE_SITE")
+		or os.environ.get("SITE")
+		or ""
+	).strip()
+	if not site:
+		currentsite = os.path.join(sites_path, "currentsite.txt")
+		if os.path.isfile(currentsite):
+			with open(currentsite, encoding="utf-8") as fh:
+				site = fh.read().strip()
+	if not site:
+		# Prefer public stream site when currentsite.txt is absent.
+		for candidate in ("www.domino101.com", "domino101.com"):
+			if os.path.isdir(os.path.join(sites_path, candidate)):
+				site = candidate
+				break
+
+	with frappe.init_site(site or None):
 		redis_connection = get_redis_conn()
 		queues = get_queue_list(None, build_queue_name=True)
 
@@ -40,7 +61,7 @@ def main() -> int:
 		)
 		return 1
 
-	print(f"domino_stream RQ scheduler listening queues={queues} interval=1s")
+	print(f"domino_stream RQ scheduler listening site={site or '(default)'} queues={queues} interval=1s")
 	scheduler.work()
 	return 0
 

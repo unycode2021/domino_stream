@@ -13,8 +13,6 @@
   "section_liveness",
   "publisher_heartbeat_grace_seconds",
   "kill_challenge_grace_seconds",
-  "presence_socket_namespace",
-  "presence_socket_path",
   "section_access",
   "inbound_api_key",
   "section_notes",
@@ -65,33 +63,19 @@
   },
   {
    "default": "35",
-   "description": "Seconds without publisher_heartbeat (or with inactive SFU tracks) before reconcile stops the room. Slightly above Cloudflare ~30s track timeout.",
+   "description": "Seconds without a publisher heartbeat before it counts as stale. The saved value is used as-is.",
    "fieldname": "publisher_heartbeat_grace_seconds",
    "fieldtype": "Int",
    "label": "Publisher Heartbeat Grace (seconds)",
    "non_negative": 1
   },
   {
-   "default": "150",
-   "description": "When a publisher socket is present, reconcile opens a kill challenge and waits this many seconds for keep_alive before stopping. If no socket is present, stop immediately (no wait).",
+   "default": "20",
+   "description": "Seconds to wait for keep_alive after a kill challenge opens. The saved value is the wait. Empty uses 20.",
    "fieldname": "kill_challenge_grace_seconds",
    "fieldtype": "Int",
    "label": "Kill Challenge Grace (seconds)",
    "non_negative": 1
-  },
-  {
-   "default": "domino-stream",
-   "description": "Socket.IO namespace for publisher presence (Domino Stream Node process). Clients connect to /{namespace}.",
-   "fieldname": "presence_socket_namespace",
-   "fieldtype": "Data",
-   "label": "Presence Socket Namespace"
-  },
-  {
-   "default": "/domino-stream-socket.io",
-   "description": "Socket.IO engine path for Domino Stream presence (nginx must proxy this to domino_stream_io).",
-   "fieldname": "presence_socket_path",
-   "fieldtype": "Data",
-   "label": "Presence Socket Path"
   },
   {
    "fieldname": "section_access",
