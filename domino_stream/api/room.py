@@ -1121,3 +1121,26 @@ def get_room_status(table_id: str):
 		"heartbeat_fresh": publisher_heartbeat_fresh(room) if room.status == "Live" else False,
 		"grace_seconds": get_heartbeat_grace_seconds(),
 	}
+
+
+@frappe.whitelist()
+def open_match_program_bridge(match_id, rtmps_url, stream_key, public_origin=None):
+	"""WHIP path that pushes the match composite to a Cloudflare live input."""
+	require_stream_access()
+	from domino_stream.api.mediamtx_bridge import open_program_path
+
+	return open_program_path(
+		match_id,
+		rtmps_url,
+		stream_key,
+		public_origin or "",
+	)
+
+
+@frappe.whitelist()
+def close_match_program_bridge(match_id):
+	"""Drop the MediaMTX path for this match."""
+	require_stream_access()
+	from domino_stream.api.mediamtx_bridge import close_program_path
+
+	return close_program_path(match_id)

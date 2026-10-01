@@ -8,6 +8,8 @@ app_license = "mit"
 after_install = "domino_stream.install.after_install"
 after_migrate = "domino_stream.install.after_migrate"
 
+before_request = ["domino_stream.api.mediamtx_bridge.proxy_whip_request"]
+
 website_route_rules = [
 	{"from_route": "/domino-stream/<path:app_path>", "to_route": "domino_stream"},
 	{"from_route": "/domino-stream", "to_route": "domino_stream"},

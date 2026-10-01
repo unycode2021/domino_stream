@@ -1,0 +1,70 @@
+# MediaMTX v1.21.1 — WHIP in, RTMPS out for Match Program.
+# Binary: apps/domino_stream/bin/mediamtx
+# Browser signaling is proxied at /mediamtx/ . Media uses UDP 8189.
+
+logLevel: info
+logDestinations: [stdout]
+logStructured: false
+
+readTimeout: 30s
+writeTimeout: 30s
+
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+        path: "~^program-"
+      - action: read
+        path: "~^program-"
+      - action: playback
+        path: "~^program-"
+  - user: any
+    pass:
+    ips: ["127.0.0.1", "::1"]
+    permissions:
+      - action: api
+      - action: metrics
+      - action: pprof
+      - action: read
+      - action: publish
+        path: "~^program-"
+
+api: true
+apiAddress: 127.0.0.1:9997
+
+metrics: false
+pprof: false
+playback: false
+
+rtsp: true
+rtspTransports: [tcp]
+rtspEncryption: "no"
+rtspAddress: 127.0.0.1:8554
+
+rtmp: false
+hls: false
+srt: false
+moq: false
+
+webrtc: true
+webrtcAddress: 127.0.0.1:8889
+webrtcEncryption: false
+webrtcAllowOrigins: ["*"]
+webrtcTrustedProxies: ["127.0.0.1", "::1"]
+webrtcLocalUDPAddress: :8189
+webrtcLocalTCPAddress: :8190
+webrtcIPsFromInterfaces: true
+webrtcAdditionalHosts: []
+webrtcICEServers2:
+  - url: stun:stun.cloudflare.com:3478
+webrtcSTUNGatherTimeout: 5s
+webrtcHandshakeTimeout: 15s
+webrtcTrackGatherTimeout: 2s
+
+pathDefaults:
+  source: publisher
+
+paths: {}

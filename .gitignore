@@ -61,3 +61,6 @@ ENV/
 *.sublime-*
 .DS_Store
 Thumbs.db
+
+# MediaMTX v1.21.1 binary (linux amd64) lives here, not in git
+bin/
