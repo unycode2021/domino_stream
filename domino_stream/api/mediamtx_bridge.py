@@ -89,7 +89,8 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 
 	``$RTSP_PORT`` and ``$MTX_PATH`` are expanded by MediaMTX, not by a shell.
 	The first token is the wrapper, which logs FFmpeg's wait status. Video is
-	copied. Audio is AAC when the publisher codec is Opus.
+	copied. Audio is AAC when the publisher codec is Opus. Input probe and
+	mux delay are capped so this hop does not add the default five-second buffer.
 	"""
 	if not push_url or not ffmpeg_bin:
 		raise ValueError("push url and ffmpeg are required")
@@ -101,6 +102,14 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 		"warning",
 		"-fflags",
 		"+discardcorrupt",
+		"-flags",
+		"low_delay",
+		"-analyzeduration",
+		"1000000",
+		"-probesize",
+		"65536",
+		"-max_delay",
+		"500000",
 		"-rtsp_transport",
 		"tcp",
 		"-i",
@@ -112,6 +121,10 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 		"flv",
 		"-flvflags",
 		"no_duration_filesize",
+		"-muxdelay",
+		"0",
+		"-muxpreload",
+		"0",
 		push_url,
 	]
 	return " ".join(shlex.quote(part) for part in parts)
