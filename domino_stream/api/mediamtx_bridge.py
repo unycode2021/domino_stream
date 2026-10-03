@@ -153,8 +153,35 @@ def scrub_rtmp_urls(text: str) -> str:
 	return _RTMP_URL_RE.sub("rtmps://[redacted]", text or "")
 
 
-def _cache_key(match_id: str) -> str:
+def safe_session_id(session_id: str) -> str:
+	return re.sub(r"[^A-Za-z0-9]", "", session_id or "")[:32]
+
+
+def session_cache_key(match_id: str, session_id: str) -> str:
+	"""One MediaMTX path per session. A second angle does not share this key."""
+	safe = safe_match_id(match_id)
+	session = safe_session_id(session_id)
+	if not safe or not session:
+		raise ValueError("match id and session are required")
+	return f"mediamtx_program:{safe}:{session}"
+
+
+def legacy_cache_key(match_id: str) -> str:
+	"""Single-path key from before sessions. Closed when that match's YouTube owner starts."""
 	return f"mediamtx_program:{safe_match_id(match_id)}"
+
+
+def program_path_config(forward_command: str | None) -> dict:
+	"""Publisher path. Only the YouTube owner gets an FFmpeg forward."""
+	config = {"source": "publisher"}
+	if forward_command:
+		config["runOnAvailable"] = forward_command
+		config["runOnAvailableRestart"] = True
+	return config
+
+
+def _cache_key(match_id: str) -> str:
+	return legacy_cache_key(match_id)
 
 
 def _cache():
@@ -218,15 +245,41 @@ def _delete_path(path_name: str) -> None:
 	_request("DELETE", f"/v3/config/paths/delete/{quote(path_name, safe='')}")
 
 
-def _store_path(match_id: str, path_name: str) -> None:
-	_cache().set_value(_cache_key(match_id), {"path_name": path_name}, expires_in_sec=12 * 60 * 60)
+def _store_path(match_id: str, path_name: str, session_id: str = "") -> None:
+	payload = {"path_name": path_name}
+	if safe_session_id(session_id):
+		_cache().set_value(
+			session_cache_key(match_id, session_id),
+			payload,
+			expires_in_sec=12 * 60 * 60,
+		)
+		return
+	_cache().set_value(_cache_key(match_id), payload, expires_in_sec=12 * 60 * 60)
 
 
-def _drop_path(match_id: str) -> None:
+def _drop_path(match_id: str, session_id: str = "") -> None:
 	try:
-		_cache().delete_value(_cache_key(match_id))
+		if safe_session_id(session_id):
+			_cache().delete_value(session_cache_key(match_id, session_id))
+		else:
+			_cache().delete_value(_cache_key(match_id))
 	except Exception:
 		pass
+
+
+def _cached_path_name(match_id: str, session_id: str = "") -> str:
+	key = (
+		session_cache_key(match_id, session_id)
+		if safe_session_id(session_id)
+		else _cache_key(match_id)
+	)
+	try:
+		raw = _cache().get_value(key, expires=True)
+	except Exception:
+		raw = None
+	if isinstance(raw, dict):
+		return (raw.get("path_name") or "").strip()
+	return ""
 
 
 def _advertise_origin(origin: str) -> None:
@@ -236,34 +289,47 @@ def _advertise_origin(origin: str) -> None:
 	_request("PATCH", "/v3/config/global/patch", {"webrtcAdditionalHosts": [host]})
 
 
-def open_program_path(match_id: str, rtmps_url: str, stream_key: str, public_origin: str) -> dict:
-	"""Create the WHIP path that pushes this match to the live input."""
+def open_program_path(
+	match_id: str,
+	rtmps_url: str,
+	stream_key: str,
+	public_origin: str,
+	session_id: str = "",
+	forward: bool = True,
+) -> dict:
+	"""Create this session's WHIP path.
+
+	Closes only this session's previous path. Other angles stay up.
+	``forward`` is the YouTube owner. An angle does not get ``runOnAvailable``.
+	"""
 	import frappe
 	from frappe import _
 
 	if not safe_match_id(match_id):
 		frappe.throw(_("Match is not loaded"))
-	ffmpeg_bin = resolve_ffmpeg_bin()
-	wrapper = forward_wrapper_path()
-	if not ffmpeg_bin:
-		frappe.throw(_("ffmpeg is not installed"))
-	if not os.access(wrapper, os.X_OK):
-		frappe.throw(_("The live forward is not installed."))
-	push_url = rtmps_push_url(rtmps_url, stream_key)
-	if not push_url.startswith("rtmp"):
-		frappe.throw(_("Live ingest address is missing"))
+	push_url = ""
+	command = None
+	if forward:
+		ffmpeg_bin = resolve_ffmpeg_bin()
+		wrapper = forward_wrapper_path()
+		if not ffmpeg_bin:
+			frappe.throw(_("ffmpeg is not installed"))
+		if not os.access(wrapper, os.X_OK):
+			frappe.throw(_("The live forward is not installed."))
+		push_url = rtmps_push_url(rtmps_url, stream_key)
+		if not push_url.startswith("rtmp"):
+			frappe.throw(_("Live ingest address is missing"))
+		command = build_forward_command(push_url, ffmpeg_bin, audio_codec="opus")
 
-	close_program_path(match_id)
+	close_program_path(match_id, session_id=session_id)
+	if forward:
+		# The pre-session cache must not keep a second FFmpeg on the same ingest.
+		_close_legacy_path(match_id)
 	path_name = program_path_name(match_id, secrets.token_hex(_PATH_TOKEN_BYTES))
-	command = build_forward_command(push_url, ffmpeg_bin, audio_codec="opus")
 	response = _request(
 		"POST",
 		f"/v3/config/paths/add/{quote(path_name, safe='')}",
-		{
-			"source": "publisher",
-			"runOnAvailable": command,
-			"runOnAvailableRestart": True,
-		},
+		program_path_config(command),
 	)
 	if response is None:
 		_throw_bridge_down()
@@ -271,12 +337,14 @@ def open_program_path(match_id: str, rtmps_url: str, stream_key: str, public_ori
 		_delete_path(path_name)
 		_throw_rejected()
 
-	_store_path(match_id, path_name)
+	_store_path(match_id, path_name, session_id)
 	_advertise_origin(public_origin)
 	return {
 		"success": True,
 		"match_id": match_id,
+		"session_id": safe_session_id(session_id),
 		"path_name": path_name,
+		"forward": bool(forward),
 		"whip_url": whip_public_url(public_origin, path_name),
 	}
 
@@ -346,25 +414,41 @@ def _public_whip_location(location: str, request) -> str:
 	return public
 
 
-def close_program_path(match_id: str) -> dict:
-	"""Remove every MediaMTX path for this match. Safe when none exist."""
+def _close_legacy_path(match_id: str) -> None:
+	"""Delete only the single path stored before sessions existed."""
+	name = _cached_path_name(match_id, "")
+	if name:
+		_delete_path(name)
+	_drop_path(match_id, "")
+
+
+def close_program_path(match_id: str, session_id: str = "") -> dict:
+	"""Remove one session path.
+
+	An empty session_id still removes every MediaMTX path for the match. That
+	is the pre-session teardown. Pass the owner session to leave other paths up.
+	"""
 	if not safe_match_id(match_id):
 		return {"success": True, "closed": False}
+	session = safe_session_id(session_id)
 	names = []
-	try:
-		raw = _cache().get_value(_cache_key(match_id), expires=True)
-	except Exception:
-		raw = None
-	if isinstance(raw, dict) and raw.get("path_name"):
-		names.append(raw["path_name"])
-	try:
-		names.extend(_path_names_for_match(match_id))
-	except Exception:
-		pass
+	cached = _cached_path_name(match_id, session)
+	if cached:
+		names.append(cached)
+	if not session:
+		try:
+			names.extend(_path_names_for_match(match_id))
+		except Exception:
+			pass
 	seen = []
 	for name in names:
 		if name and name not in seen:
 			seen.append(name)
 			_delete_path(name)
-	_drop_path(match_id)
-	return {"success": True, "closed": bool(seen), "match_id": match_id}
+	_drop_path(match_id, session)
+	return {
+		"success": True,
+		"closed": bool(seen),
+		"match_id": match_id,
+		"session_id": session,
+	}

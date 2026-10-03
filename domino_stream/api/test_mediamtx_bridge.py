@@ -8,10 +8,12 @@ from domino_stream.api.mediamtx_bridge import (
 	build_forward_command,
 	forward_wrapper_path,
 	forward_audio_args,
+	program_path_config,
 	program_path_name,
 	program_path_prefix,
 	rtmps_push_url,
 	scrub_rtmp_urls,
+	session_cache_key,
 	whip_public_url,
 )
 
@@ -87,6 +89,20 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertIsNone(mediamtx_upstream_path("/mediamtx/v3/config/paths/list"))
 		self.assertIsNone(mediamtx_upstream_path("/mediamtx/program-MCH00967-ab12/../whip"))
 		self.assertIsNone(mediamtx_upstream_path("/api/method/ping"))
+
+	def test_session_paths_do_not_share_a_cache_key(self):
+		first = session_cache_key("MCH00967", "aaa111")
+		second = session_cache_key("MCH00967", "bbb222")
+		self.assertNotEqual(first, second)
+		self.assertTrue(first.endswith(":aaa111"))
+
+	def test_angle_path_has_no_youtube_forward(self):
+		angle = program_path_config(None)
+		owner = program_path_config("ffmpeg push")
+		self.assertEqual(angle, {"source": "publisher"})
+		self.assertNotIn("runOnAvailable", angle)
+		self.assertEqual(owner["runOnAvailable"], "ffmpeg push")
+		self.assertTrue(owner["runOnAvailableRestart"])
 
 	def test_scrub_hides_the_push_url(self):
 		text = scrub_rtmp_urls("push rtmps://live.cloudflare.com:443/live/secret failed")

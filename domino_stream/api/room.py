@@ -30,6 +30,11 @@ DEFAULT_KILL_CHALLENGE_GRACE_SECONDS = 20
 stop_logger = frappe.logger("domino_stream_stop", allow_site=True, file_count=20)
 
 
+def _is_program_angle_stream(table_id: str) -> bool:
+	"""Match Program angle id. Not a match table, so Live Now table flags stay put."""
+	return str(table_id or "").startswith("program-")
+
+
 def _get_or_create_room(table_id: str):
 	name = frappe.db.get_value("Stream Room", {"table_id": table_id}, "name")
 	if name:
@@ -234,12 +239,15 @@ def _stop_room_internal(room, *, reason: str = ""):
 	except Exception:
 		pass
 
-	notify = live_now.notify_live(table_id, False)
-	live_now.post_www_webhook(
-		table_id,
-		live=False,
-		stream_name=f"Domino Match Table {table_id}",
-	)
+	if _is_program_angle_stream(table_id):
+		notify = {"success": True, "skipped": True, "reason": "program_angle"}
+	else:
+		notify = live_now.notify_live(table_id, False)
+		live_now.post_www_webhook(
+			table_id,
+			live=False,
+			stream_name=f"Domino Match Table {table_id}",
+		)
 	return notify
 
 
@@ -439,13 +447,16 @@ def publish_tracks(
 		},
 	)
 
-	notify = live_now.notify_live(table_id, True)
-	live_now.post_www_webhook(
-		table_id,
-		live=True,
-		stream_name=f"Domino Match Table {table_id}",
-	)
-	if notify.get("success"):
+	if _is_program_angle_stream(table_id):
+		notify = {"success": True, "skipped": True, "reason": "program_angle"}
+	else:
+		notify = live_now.notify_live(table_id, True)
+		live_now.post_www_webhook(
+			table_id,
+			live=True,
+			stream_name=f"Domino Match Table {table_id}",
+		)
+	if notify.get("success") and not notify.get("skipped"):
 		room.www_notified_live = 1
 		room.save(ignore_permissions=True)
 		frappe.db.commit()
@@ -1071,8 +1082,12 @@ def renegotiate_play(table_id: str, session_id: str, sdp: str, sdp_type: str = "
 
 
 @frappe.whitelist(allow_guest=True)
-def stop(table_id: str):
-	"""Close publisher tracks / mark room stopped and notify www Live Now."""
+def stop(table_id: str, publisher_session_id: str = None):
+	"""Close publisher tracks / mark room stopped and notify www Live Now.
+
+	A live room stops only when ``publisher_session_id`` is the session that
+	started it. Another Table Room window cannot end that stream.
+	"""
 	require_stream_access()
 	if not table_id:
 		frappe.throw(_("table_id is required"))
@@ -1082,6 +1097,12 @@ def stop(table_id: str):
 		return {"success": True, "message": "No room", "table_id": table_id}
 
 	room = frappe.get_doc("Stream Room", room_name)
+	owner = (room.publisher_session_id or "").strip()
+	if room.status == "Live" and owner and (publisher_session_id or "").strip() != owner:
+		frappe.throw(
+			_("This window did not start the stream"),
+			frappe.ValidationError,
+		)
 	notify = _stop_room_internal(room, reason="client_stop")
 	return {
 		"success": True,
@@ -1124,23 +1145,37 @@ def get_room_status(table_id: str):
 
 
 @frappe.whitelist()
-def open_match_program_bridge(match_id, rtmps_url, stream_key, public_origin=None):
-	"""WHIP path that pushes the match composite to a Cloudflare live input."""
+def open_match_program_bridge(
+	match_id,
+	rtmps_url,
+	stream_key,
+	public_origin=None,
+	session_id=None,
+	forward=1,
+):
+	"""WHIP path for one Match Program session.
+
+	``forward`` is on only for the YouTube owner. Other sessions are not
+	given a second push to the same ingest.
+	"""
 	require_stream_access()
 	from domino_stream.api.mediamtx_bridge import open_program_path
 
+	forward_on = str(forward).strip().lower() not in ("0", "false", "no", "")
 	return open_program_path(
 		match_id,
 		rtmps_url,
 		stream_key,
 		public_origin or "",
+		session_id=session_id or "",
+		forward=forward_on,
 	)
 
 
 @frappe.whitelist()
-def close_match_program_bridge(match_id):
-	"""Drop the MediaMTX path for this match."""
+def close_match_program_bridge(match_id, session_id=None):
+	"""Drop one session path. An empty session_id drops only the legacy path list."""
 	require_stream_access()
 	from domino_stream.api.mediamtx_bridge import close_program_path
 
-	return close_program_path(match_id)
+	return close_program_path(match_id, session_id=session_id or "")
