@@ -42,7 +42,7 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertEqual(forward_audio_args("opus")[:2], ["-c:a", "aac"])
 		self.assertEqual(forward_audio_args("aac"), ["-c:a", "copy"])
 
-	def test_forward_command_copies_video_and_transcodes_opus(self):
+	def test_forward_command_reencodes_video_on_the_wall_clock(self):
 		push = "rtmps://live.cloudflare.com:443/live/secret-key"
 		command = build_forward_command(push, "/opt/ffmpeg", audio_codec="opus")
 		argv = shlex.split(command)
@@ -51,24 +51,41 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertIn("rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH", argv)
 		self.assertLess(argv.index("+discardcorrupt"), argv.index("-i"))
 		self.assertLess(argv.index("low_delay"), argv.index("-i"))
-		self.assertEqual(argv[argv.index("-analyzeduration") + 1], "1000000")
-		self.assertEqual(argv[argv.index("-probesize") + 1], "65536")
+		self.assertEqual(argv[argv.index("-analyzeduration") + 1], "3000000")
+		self.assertEqual(argv[argv.index("-probesize") + 1], "5000000")
 		self.assertEqual(argv[argv.index("-max_delay") + 1], "500000")
 		self.assertLess(argv.index("-max_delay"), argv.index("-i"))
-		self.assertEqual(argv[argv.index("-c:v") + 1], "copy")
+		self.assertEqual(argv[argv.index("-use_wallclock_as_timestamps") + 1], "1")
+		self.assertLess(argv.index("-use_wallclock_as_timestamps"), argv.index("-i"))
+		self.assertEqual(
+			argv[argv.index("-vf") + 1],
+			"fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+		)
+		self.assertEqual(argv[argv.index("-c:v") + 1], "libx264")
+		self.assertEqual(argv[argv.index("-preset") + 1], "veryfast")
+		self.assertEqual(argv[argv.index("-tune") + 1], "zerolatency")
+		self.assertEqual(argv[argv.index("-profile:v") + 1], "baseline")
+		self.assertEqual(argv[argv.index("-bf") + 1], "0")
+		self.assertEqual(argv[argv.index("-g") + 1], "60")
+		self.assertEqual(argv[argv.index("-keyint_min") + 1], "60")
+		self.assertEqual(argv[argv.index("-r") + 1], "30")
+		self.assertEqual(argv[argv.index("-b:v") + 1], "4500k")
+		self.assertEqual(argv[argv.index("-maxrate") + 1], "4500k")
+		self.assertEqual(argv[argv.index("-bufsize") + 1], "1500k")
 		self.assertEqual(argv[argv.index("-c:a") + 1], "aac")
+		self.assertEqual(argv[argv.index("-b:a") + 1], "128k")
+		self.assertEqual(argv[argv.index("-ar") + 1], "44100")
 		self.assertIn("no_duration_filesize", argv)
 		self.assertEqual(argv[argv.index("-muxdelay") + 1], "0")
 		self.assertEqual(argv[argv.index("-muxpreload") + 1], "0")
 		self.assertEqual(argv[-1], push)
-		self.assertNotIn("libx264", argv)
 		self.assertNotIn("nobuffer", command)
 		self.assertNotIn("genpts", command)
-		self.assertNotIn("use_wallclock_as_timestamps", command)
 
-	def test_forward_command_copies_aac(self):
+	def test_forward_command_copies_aac_and_still_reencodes_video(self):
 		command = build_forward_command("rtmps://example/live/k", "/opt/ffmpeg", audio_codec="aac")
 		argv = shlex.split(command)
+		self.assertEqual(argv[argv.index("-c:v") + 1], "libx264")
 		self.assertEqual(argv[argv.index("-c:a") + 1], "copy")
 
 	def test_whip_url_uses_the_public_prefix(self):

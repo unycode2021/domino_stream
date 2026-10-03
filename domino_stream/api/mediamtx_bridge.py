@@ -1,7 +1,8 @@
-"""Per-match MediaMTX path: browser WHIP in, RTMPS to a Cloudflare live input.
+"""Per-match MediaMTX path: browser WHIP in, RTMPS out to YouTube or Cloudflare.
 
 The browser publishes constrained-baseline H.264. MediaMTX remuxes that to
-RTSP, and FFmpeg copies the video and transcodes Opus to AAC.
+RTSP. FFmpeg re-encodes video onto a wall clock at a steady 30 fps so a
+missing frame does not slide YouTube's live edge, and transcodes Opus to AAC.
 """
 
 from __future__ import annotations
@@ -89,8 +90,10 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 
 	``$RTSP_PORT`` and ``$MTX_PATH`` are expanded by MediaMTX, not by a shell.
 	The first token is the wrapper, which logs FFmpeg's wait status. Video is
-	copied. Audio is AAC when the publisher codec is Opus. Input probe and
-	mux delay are capped so this hop does not add the default five-second buffer.
+	re-encoded to a 30 fps baseline CBR on the wall clock, so a dropped input
+	frame is repeated instead of opening a hole in YouTube's timeline. Audio
+	is AAC when the publisher codec is Opus. The probe is long enough to see
+	one keyframe. Mux delay stays at zero. ``nobuffer`` and ``genpts`` stay off.
 	"""
 	if not push_url or not ffmpeg_bin:
 		raise ValueError("push url and ffmpeg are required")
@@ -105,17 +108,41 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 		"-flags",
 		"low_delay",
 		"-analyzeduration",
-		"1000000",
+		"3000000",
 		"-probesize",
-		"65536",
+		"5000000",
 		"-max_delay",
 		"500000",
+		"-use_wallclock_as_timestamps",
+		"1",
 		"-rtsp_transport",
 		"tcp",
 		"-i",
 		"rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH",
+		"-vf",
+		"fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+		"-r",
+		"30",
 		"-c:v",
-		"copy",
+		"libx264",
+		"-preset",
+		"veryfast",
+		"-tune",
+		"zerolatency",
+		"-profile:v",
+		"baseline",
+		"-bf",
+		"0",
+		"-g",
+		"60",
+		"-keyint_min",
+		"60",
+		"-b:v",
+		"4500k",
+		"-maxrate",
+		"4500k",
+		"-bufsize",
+		"1500k",
 		*forward_audio_args(audio_codec),
 		"-f",
 		"flv",

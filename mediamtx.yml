@@ -8,6 +8,11 @@ logStructured: false
 
 readTimeout: 30s
 writeTimeout: 30s
+# WHIP media arrives on UDP 8189. MediaMTX exits if this is larger than
+# net.core.rmem_max. This host is capped at 212992 until that sysctl (and
+# net.core.rmem_default) is raised to at least 1000000. Then set this to
+# 1000000 so a short stall does not drop H.264 fragments.
+udpReadBufferSize: 212992
 
 authMethod: internal
 authInternalUsers:
