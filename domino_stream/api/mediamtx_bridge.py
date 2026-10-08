@@ -12,6 +12,7 @@ import re
 import secrets
 import shlex
 import shutil
+import subprocess
 from urllib.parse import quote, urlparse
 
 import requests
@@ -72,15 +73,58 @@ def forward_wrapper_path() -> str:
 	return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "mediamtx-forward.sh"))
 
 
-def resolve_ffmpeg_bin() -> str | None:
-	"""Absolute ffmpeg. The MediaMTX process does not inherit a login PATH."""
+def app_ffmpeg_path() -> str:
+	"""Pinned ffmpeg downloaded next to the MediaMTX binary."""
+	return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "bin", "ffmpeg"))
+
+
+def ffmpeg_candidate_paths() -> list[str]:
+	"""App binary, then FFMPEG_BIN, then a system ffmpeg. Duplicates are dropped."""
 	override = (os.environ.get("FFMPEG_BIN") or "").strip()
 	bench_bin = os.path.abspath(
 		os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "bin", "ffmpeg")
 	)
-	candidates = [override, shutil.which("ffmpeg") or "", bench_bin, "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
-	for candidate in candidates:
-		if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+	ordered = [
+		app_ffmpeg_path(),
+		override,
+		shutil.which("ffmpeg") or "",
+		bench_bin,
+		"/usr/bin/ffmpeg",
+		"/usr/local/bin/ffmpeg",
+	]
+	seen = []
+	for candidate in ordered:
+		if candidate and candidate not in seen:
+			seen.append(candidate)
+	return seen
+
+
+def ffmpeg_supports_libx264(path: str) -> bool:
+	"""True when this executable can encode with libx264."""
+	if not path or not os.path.isfile(path) or not os.access(path, os.X_OK):
+		return False
+	try:
+		completed = subprocess.run(
+			[path, "-hide_banner", "-encoders"],
+			capture_output=True,
+			text=True,
+			timeout=15,
+			check=False,
+		)
+	except (OSError, subprocess.TimeoutExpired):
+		return False
+	text = f"{completed.stdout}\n{completed.stderr}"
+	return "libx264" in text
+
+
+def resolve_ffmpeg_bin() -> str | None:
+	"""Absolute ffmpeg with libx264. MediaMTX does not inherit a login PATH.
+
+	The app binary under bin/ffmpeg wins, then FFMPEG_BIN, then a system ffmpeg.
+	A binary without libx264 is skipped.
+	"""
+	for candidate in ffmpeg_candidate_paths():
+		if ffmpeg_supports_libx264(candidate):
 			return candidate
 	return None
 

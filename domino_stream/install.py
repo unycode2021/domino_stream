@@ -50,6 +50,7 @@ def after_install():
 	except Exception as e:
 		# DocType controllers may not be importable mid-install; migrate/after_migrate covers this.
 		frappe.log_error(f"domino_stream after_install: {e}", "Domino Stream Install")
+	_ensure_stream_runtime()
 
 
 def after_migrate():
@@ -62,3 +63,22 @@ def after_migrate():
 		frappe.db.commit()
 	except Exception as e:
 		frappe.log_error(f"domino_stream after_migrate: {e}", "Domino Stream Migrate")
+	_ensure_stream_runtime()
+
+
+def _ensure_stream_runtime():
+	"""Download MediaMTX and ffmpeg, then wire local processes.
+
+	A failed download is logged. It does not undo the DocType install above.
+	"""
+	try:
+		from domino_stream.runtime import ensure_runtime
+
+		result = ensure_runtime()
+		if result.errors:
+			frappe.log_error("\n".join(result.errors), "Domino Stream Runtime")
+	except Exception as e:
+		try:
+			frappe.log_error(f"domino_stream runtime: {e}", "Domino Stream Runtime")
+		except Exception:
+			pass

@@ -1,16 +1,22 @@
 """Pure tests for the MediaMTX WHIP → RTMPS command. No live MediaMTX."""
 
 import shlex
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from domino_stream.api.mediamtx_bridge import (
+	app_ffmpeg_path,
 	audio_needs_aac,
 	build_forward_command,
+	ffmpeg_candidate_paths,
 	forward_wrapper_path,
 	forward_audio_args,
 	program_path_config,
 	program_path_name,
 	program_path_prefix,
+	resolve_ffmpeg_bin,
 	rtmps_push_url,
 	scrub_rtmp_urls,
 	session_cache_key,
@@ -125,6 +131,38 @@ class TestMediaMtxBridge(unittest.TestCase):
 		text = scrub_rtmp_urls("push rtmps://live.cloudflare.com:443/live/secret failed")
 		self.assertNotIn("secret", text)
 		self.assertIn("rtmps://[redacted]", text)
+
+	def test_candidate_order_starts_with_the_app_binary(self):
+		self.assertEqual(ffmpeg_candidate_paths()[0], app_ffmpeg_path())
+
+	def test_app_binary_with_libx264_wins(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			app_bin = Path(tmp) / "app-ffmpeg"
+			system_bin = Path(tmp) / "system-ffmpeg"
+			_write_fake_ffmpeg(app_bin, "libx264")
+			_write_fake_ffmpeg(system_bin, "libx264")
+			with patch(
+				"domino_stream.api.mediamtx_bridge.ffmpeg_candidate_paths",
+				return_value=[str(app_bin), str(system_bin)],
+			):
+				self.assertEqual(resolve_ffmpeg_bin(), str(app_bin))
+
+	def test_binary_without_libx264_is_skipped(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			app_bin = Path(tmp) / "app-ffmpeg"
+			system_bin = Path(tmp) / "system-ffmpeg"
+			_write_fake_ffmpeg(app_bin, "aac only")
+			_write_fake_ffmpeg(system_bin, "libx264")
+			with patch(
+				"domino_stream.api.mediamtx_bridge.ffmpeg_candidate_paths",
+				return_value=[str(app_bin), str(system_bin)],
+			):
+				self.assertEqual(resolve_ffmpeg_bin(), str(system_bin))
+
+
+def _write_fake_ffmpeg(path: Path, text: str) -> None:
+	path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{text}'\n", encoding="utf-8")
+	path.chmod(0o755)
 
 
 if __name__ == "__main__":

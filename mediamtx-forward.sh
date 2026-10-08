@@ -3,7 +3,9 @@
 # that child, so this shell can exit with the wait status. Go's ExitCode()
 # is -1 only when the process MediaMTX launched is itself signaled.
 set -u
-log="/home/adowie/frappe-bench/logs/mediamtx-forward.log"
+app_dir="$(cd "$(dirname "$0")" && pwd)" || exit 1
+bench_dir="$(cd "$app_dir/../.." && pwd)" || exit 1
+log="$bench_dir/logs/mediamtx-forward.log"
 mkdir -p "$(dirname "$log")"
 {
 	printf '%s start\n' "$(date -Is)"

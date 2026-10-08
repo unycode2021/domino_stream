@@ -1,0 +1,59 @@
+{
+ "actions": [],
+ "creation": "2026-10-04 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "cloudflare_realtime_app_id",
+  "cloudflare_realtime_app_secret",
+  "section_notes",
+  "notes"
+ ],
+ "fields": [
+  {
+   "description": "Cloudflare Realtime app for ODP board voice only. This is a different app from Stream Settings. Never expose the App ID to browsers.",
+   "fieldname": "cloudflare_realtime_app_id",
+   "fieldtype": "Data",
+   "label": "ODP Voice App ID"
+  },
+  {
+   "description": "Bearer token for the ODP voice Realtime app. Server-side only. Not the Domino Stream match app secret.",
+   "fieldname": "cloudflare_realtime_app_secret",
+   "fieldtype": "Password",
+   "label": "ODP Voice App Secret"
+  },
+  {
+   "fieldname": "section_notes",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-04 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Domino Stream",
+ "name": "ODP Voice Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
