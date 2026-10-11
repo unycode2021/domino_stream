@@ -30,6 +30,24 @@ DEFAULT_KILL_CHALLENGE_GRACE_SECONDS = 20
 stop_logger = frappe.logger("domino_stream_stop", allow_site=True, file_count=20)
 
 
+def _enforce_domino101_stream_policy(kind: str, table_id: str) -> None:
+	"""Hour and ticket checks when this site has Domino101 and a real user session.
+
+	API-key calls from www already ran the same checks as the publisher or viewer.
+	"""
+	user = frappe.session.user
+	if not user or user == "Guest":
+		return
+	try:
+		from domino101.api import stream_hours
+	except Exception:
+		return
+	if kind == "play":
+		stream_hours.assert_viewer_may_play(table_id, user)
+	else:
+		stream_hours.assert_publisher_may_start(table_id, user)
+
+
 def _is_program_angle_stream(table_id: str) -> bool:
 	"""Match Program angle id. Not a match table, so Live Now table flags stay put."""
 	return str(table_id or "").startswith("program-")
@@ -289,6 +307,7 @@ def prepare_publish(table_id: str, sdp: str = None, sdp_type: str = "offer"):
 	then publish_tracks with a second offer + local track mid/trackName.
 	"""
 	require_stream_access()
+	_enforce_domino101_stream_policy("publish", table_id)
 	if not table_id:
 		frappe.throw(_("table_id is required"))
 	if not sdp:
@@ -353,6 +372,7 @@ def publish_tracks(
 	  {"location": "local", "trackName": "table-video", "mid": "0"}
 	"""
 	require_stream_access()
+	_enforce_domino101_stream_policy("publish", table_id)
 	if not table_id:
 		frappe.throw(_("table_id is required"))
 
@@ -949,6 +969,7 @@ def prepare_play(table_id: str, sdp: str = None, sdp_type: str = "offer"):
 	wait ICE connected → pull_play_tracks(session_id).
 	"""
 	require_stream_access()
+	_enforce_domino101_stream_policy("play", table_id)
 	if not table_id:
 		frappe.throw(_("table_id is required"))
 	if not sdp:
