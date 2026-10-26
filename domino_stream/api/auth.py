@@ -16,9 +16,18 @@ def get_inbound_api_key() -> str:
 		return ""
 
 
+GRANT_PUBLISHER_FLAG = "domino_stream_publisher_user"
+
+
+def grant_publisher_user() -> str:
+	"""Grantor set by www for an in-process recorder publish grant. Server-side only."""
+	return (frappe.flags.get(GRANT_PUBLISHER_FLAG) or "").strip()
+
+
 def require_stream_access():
 	"""
-	Allow logged-in users, inbound API key, or a valid presence token.
+	Allow logged-in users, inbound API key, a valid presence token, or an
+	in-process call that www already authorized with a recorder publish grant.
 
 	Clients may send:
 	- Header X-Domino-Stream-Key: <key>
@@ -27,6 +36,8 @@ def require_stream_access():
 	"""
 	if frappe.session.user and frappe.session.user not in ("Guest",):
 		# Authenticated Frappe session (Desk or JWT user)
+		return
+	if grant_publisher_user():
 		return
 
 	presence_token = (

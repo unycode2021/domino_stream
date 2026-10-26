@@ -30,12 +30,19 @@ DEFAULT_KILL_CHALLENGE_GRACE_SECONDS = 20
 stop_logger = frappe.logger("domino_stream_stop", allow_site=True, file_count=20)
 
 
+def _acting_user() -> str:
+	"""Session user, or the grantor when www runs a recorder publish grant in-process."""
+	from domino_stream.api.auth import grant_publisher_user
+
+	return grant_publisher_user() or frappe.session.user
+
+
 def _enforce_domino101_stream_policy(kind: str, table_id: str) -> None:
 	"""Hour and ticket checks when this site has Domino101 and a real user session.
 
 	API-key calls from www already ran the same checks as the publisher or viewer.
 	"""
-	user = frappe.session.user
+	user = _acting_user() if kind != "play" else frappe.session.user
 	if not user or user == "Guest":
 		return
 	try:
@@ -84,7 +91,7 @@ def _upsert_participant(room_name: str, role: str, session_id: str, user: str | 
 			"room": room_name,
 			"role": role,
 			"session_id": session_id,
-			"user": user or frappe.session.user,
+			"user": user or _acting_user(),
 			"status": "Active",
 		}
 	)
@@ -147,8 +154,9 @@ def _touch_publisher_heartbeat(room, *, via_socket: bool = False):
 	room.tracks_inactive_since = None
 	if via_socket:
 		room.publisher_socket_present = 1
-	if frappe.session.user and frappe.session.user != "Guest":
-		room.publisher_user = frappe.session.user
+	user = _acting_user()
+	if user and user != "Guest":
+		room.publisher_user = user
 
 
 def _infer_stop_caller() -> str:
@@ -319,7 +327,8 @@ def prepare_publish(table_id: str, sdp: str = None, sdp_type: str = "offer"):
 	room = _get_or_create_room(table_id)
 
 	room.status = "Preparing"
-	room.publisher_user = frappe.session.user if frappe.session.user != "Guest" else room.publisher_user
+	acting = _acting_user()
+	room.publisher_user = acting if acting and acting != "Guest" else room.publisher_user
 	room.save(ignore_permissions=True)
 
 	session = sfu_client.create_session({"type": sdp_type or "offer", "sdp": sdp})
@@ -1163,6 +1172,18 @@ def get_room_status(table_id: str):
 		"heartbeat_fresh": publisher_heartbeat_fresh(room) if room.status == "Live" else False,
 		"grace_seconds": get_heartbeat_grace_seconds(),
 	}
+
+
+@frappe.whitelist()
+def match_program_forward_status(match_id):
+	"""Whether this match has a ready MediaMTX program path.
+
+	``known`` is false when MediaMTX cannot be listed. That is not a dead forward.
+	"""
+	require_stream_access()
+	from domino_stream.api.mediamtx_bridge import program_forward_status
+
+	return program_forward_status(match_id)
 
 
 @frappe.whitelist()

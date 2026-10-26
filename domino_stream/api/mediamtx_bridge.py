@@ -63,8 +63,24 @@ def audio_needs_aac(codec: str | None) -> bool:
 
 
 def forward_audio_args(codec: str | None = "opus") -> list[str]:
+	"""AAC encode for Opus. The resample keeps packet times monotonic.
+
+	Wall-clock stamps on the RTSP input can step backward by a few milliseconds.
+	Without this filter the AAC encoder clamps those times and the FLV muxer
+	holds video until audio catches up. ``first_pts`` is left alone so audio
+	stays on the same clock as the video. AAC input is copied.
+	"""
 	if audio_needs_aac(codec):
-		return ["-c:a", "aac", "-b:a", "128k", "-ar", "44100"]
+		return [
+			"-af",
+			"aresample=async=1:min_hard_comp=0.100000",
+			"-c:a",
+			"aac",
+			"-b:a",
+			"128k",
+			"-ar",
+			"44100",
+		]
 	return ["-c:a", "copy"]
 
 
@@ -134,10 +150,12 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 
 	``$RTSP_PORT`` and ``$MTX_PATH`` are expanded by MediaMTX, not by a shell.
 	The first token is the wrapper, which logs FFmpeg's wait status. Video is
-	re-encoded to a 30 fps baseline CBR on the wall clock, so a dropped input
-	frame is repeated instead of opening a hole in YouTube's timeline. Audio
-	is AAC when the publisher codec is Opus. The probe is long enough to see
-	one keyframe. Mux delay stays at zero. ``nobuffer`` and ``genpts`` stay off.
+	re-encoded to a 30 fps baseline 4500 kbit/s CBR on the wall clock, so a
+	dropped input frame is repeated instead of opening a hole in YouTube's
+	timeline. Opus is resampled onto a monotonic clock before AAC. Interleave
+	wait is 100 ms, so a timestamp glitch cannot park video frames. The probe
+	is long enough to see one keyframe. Mux delay stays at zero. ``nobuffer``
+	and ``genpts`` stay off.
 	"""
 	if not push_url or not ffmpeg_bin:
 		raise ValueError("push url and ffmpeg are required")
@@ -183,10 +201,14 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 		"60",
 		"-b:v",
 		"4500k",
+		"-minrate",
+		"4500k",
 		"-maxrate",
 		"4500k",
 		"-bufsize",
-		"1500k",
+		"4500k",
+		"-x264-params",
+		"nal-hrd=cbr:force-cfr=1",
 		*forward_audio_args(audio_codec),
 		"-f",
 		"flv",
@@ -196,6 +218,8 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 		"0",
 		"-muxpreload",
 		"0",
+		"-max_interleave_delta",
+		"100000",
 		push_url,
 	]
 	return " ".join(shlex.quote(part) for part in parts)
@@ -286,6 +310,43 @@ def _throw_rejected():
 	from frappe import _
 
 	frappe.throw(_("The live bridge rejected the stream path."))
+
+
+def program_forward_status(match_id: str) -> dict:
+	"""Whether this match has a ready MediaMTX program path.
+
+	``known`` is false when the path list cannot be read. Callers must not
+	treat that as a dead forward.
+	"""
+	try:
+		prefix = program_path_prefix(match_id)
+	except ValueError:
+		return {"known": True, "forwarding": False, "match_id": match_id or ""}
+	page = 0
+	while page < 20:
+		response = _request(
+			"GET", f"/v3/paths/list?page={page}&itemsPerPage=100"
+		)
+		if response is None or not response.ok:
+			return {"known": False, "forwarding": False, "match_id": match_id}
+		try:
+			data = response.json()
+		except Exception:
+			return {"known": False, "forwarding": False, "match_id": match_id}
+		items = data.get("items") if isinstance(data, dict) else None
+		if not isinstance(items, list):
+			return {"known": False, "forwarding": False, "match_id": match_id}
+		for item in items:
+			if not isinstance(item, dict):
+				continue
+			name = (item.get("name") or "").strip()
+			if name.startswith(prefix) and item.get("ready"):
+				return {"known": True, "forwarding": True, "match_id": match_id}
+		page_count = data.get("pageCount") if isinstance(data, dict) else None
+		page += 1
+		if not items or (isinstance(page_count, int) and page >= page_count):
+			break
+	return {"known": True, "forwarding": False, "match_id": match_id}
 
 
 def _path_names_for_match(match_id: str) -> list[str]:

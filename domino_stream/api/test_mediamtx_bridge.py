@@ -45,7 +45,11 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertTrue(audio_needs_aac("opus"))
 		self.assertTrue(audio_needs_aac(""))
 		self.assertFalse(audio_needs_aac("aac"))
-		self.assertEqual(forward_audio_args("opus")[:2], ["-c:a", "aac"])
+		self.assertEqual(
+			forward_audio_args("opus")[:4],
+			["-af", "aresample=async=1:min_hard_comp=0.100000", "-c:a", "aac"],
+		)
+		self.assertNotIn("first_pts", " ".join(forward_audio_args("opus")))
 		self.assertEqual(forward_audio_args("aac"), ["-c:a", "copy"])
 
 	def test_forward_command_reencodes_video_on_the_wall_clock(self):
@@ -76,23 +80,36 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertEqual(argv[argv.index("-keyint_min") + 1], "60")
 		self.assertEqual(argv[argv.index("-r") + 1], "30")
 		self.assertEqual(argv[argv.index("-b:v") + 1], "4500k")
+		self.assertEqual(argv[argv.index("-minrate") + 1], "4500k")
 		self.assertEqual(argv[argv.index("-maxrate") + 1], "4500k")
-		self.assertEqual(argv[argv.index("-bufsize") + 1], "1500k")
+		self.assertEqual(argv[argv.index("-bufsize") + 1], "4500k")
+		self.assertEqual(argv[argv.index("-x264-params") + 1], "nal-hrd=cbr:force-cfr=1")
+		self.assertEqual(
+			argv[argv.index("-af") + 1],
+			"aresample=async=1:min_hard_comp=0.100000",
+		)
+		self.assertLess(argv.index("-af"), argv.index("-c:a"))
 		self.assertEqual(argv[argv.index("-c:a") + 1], "aac")
 		self.assertEqual(argv[argv.index("-b:a") + 1], "128k")
 		self.assertEqual(argv[argv.index("-ar") + 1], "44100")
 		self.assertIn("no_duration_filesize", argv)
 		self.assertEqual(argv[argv.index("-muxdelay") + 1], "0")
 		self.assertEqual(argv[argv.index("-muxpreload") + 1], "0")
+		self.assertEqual(argv[argv.index("-max_interleave_delta") + 1], "100000")
+		self.assertLess(argv.index("-max_interleave_delta"), argv.index(push))
 		self.assertEqual(argv[-1], push)
 		self.assertNotIn("nobuffer", command)
 		self.assertNotIn("genpts", command)
+		self.assertNotIn("first_pts", command)
 
 	def test_forward_command_copies_aac_and_still_reencodes_video(self):
 		command = build_forward_command("rtmps://example/live/k", "/opt/ffmpeg", audio_codec="aac")
 		argv = shlex.split(command)
 		self.assertEqual(argv[argv.index("-c:v") + 1], "libx264")
 		self.assertEqual(argv[argv.index("-c:a") + 1], "copy")
+		self.assertNotIn("-af", argv)
+		self.assertEqual(argv[argv.index("-minrate") + 1], "4500k")
+		self.assertEqual(argv[argv.index("-max_interleave_delta") + 1], "100000")
 
 	def test_whip_url_uses_the_public_prefix(self):
 		url = whip_public_url("https://www.domino101.com/", "program-MCH00967-ab12")
