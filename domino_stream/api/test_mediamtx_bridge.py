@@ -30,6 +30,11 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertEqual(name, "program-MCH00967-ab12cd34")
 		self.assertTrue(name.startswith(program_path_prefix("MCH00967")))
 
+	def test_path_token_is_not_guessable(self):
+		from domino_stream.api.mediamtx_bridge import _PATH_TOKEN_BYTES
+
+		self.assertGreaterEqual(_PATH_TOKEN_BYTES, 16)
+
 	def test_path_name_strips_punctuation(self):
 		self.assertEqual(program_path_name("MCH/00967", "aa-bb"), "program-MCH00967-aabb")
 
@@ -79,10 +84,11 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertEqual(argv[argv.index("-g") + 1], "60")
 		self.assertEqual(argv[argv.index("-keyint_min") + 1], "60")
 		self.assertEqual(argv[argv.index("-r") + 1], "30")
-		self.assertEqual(argv[argv.index("-b:v") + 1], "4500k")
-		self.assertEqual(argv[argv.index("-minrate") + 1], "4500k")
-		self.assertEqual(argv[argv.index("-maxrate") + 1], "4500k")
-		self.assertEqual(argv[argv.index("-bufsize") + 1], "4500k")
+		self.assertNotIn("-thread_queue_size", argv)
+		self.assertEqual(argv[argv.index("-b:v") + 1], "3500k")
+		self.assertEqual(argv[argv.index("-minrate") + 1], "3500k")
+		self.assertEqual(argv[argv.index("-maxrate") + 1], "3500k")
+		self.assertEqual(argv[argv.index("-bufsize") + 1], "3500k")
 		self.assertEqual(argv[argv.index("-x264-params") + 1], "nal-hrd=cbr:force-cfr=1")
 		self.assertEqual(
 			argv[argv.index("-af") + 1],
@@ -108,7 +114,7 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertEqual(argv[argv.index("-c:v") + 1], "libx264")
 		self.assertEqual(argv[argv.index("-c:a") + 1], "copy")
 		self.assertNotIn("-af", argv)
-		self.assertEqual(argv[argv.index("-minrate") + 1], "4500k")
+		self.assertEqual(argv[argv.index("-minrate") + 1], "3500k")
 		self.assertEqual(argv[argv.index("-max_interleave_delta") + 1], "100000")
 
 	def test_whip_url_uses_the_public_prefix(self):

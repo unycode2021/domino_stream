@@ -14,6 +14,7 @@ from domino_stream.runtime import (
 	apply_nginx_config,
 	apply_procfile,
 	extract_archive_member,
+	fit_udp_read_buffer,
 	render_procfile_block,
 	render_supervisor_config,
 	verify_sha256,
@@ -176,6 +177,14 @@ class TestRuntimeConfig(unittest.TestCase):
 		self.assertNotIn("[program:frappe-bench-domino-stream-io]", without_node)
 		self.assertNotIn("FRAPPE_SITE", without_node)
 		self.assertIn("[program:frappe-bench-domino-stream-mediamtx]", without_node)
+
+	def test_udp_read_buffer_fits_the_host_limit(self):
+		text = "readTimeout: 30s\nudpReadBufferSize: 1000000\nwriteQueueSize: 4096\n"
+		low = fit_udp_read_buffer(text, 212992)
+		self.assertIn("udpReadBufferSize: 212992\n", low)
+		self.assertIn("writeQueueSize: 4096\n", low)
+		self.assertEqual(fit_udp_read_buffer(low, 1000000), text)
+		self.assertIn("udpReadBufferSize: 212992", fit_udp_read_buffer(text, None))
 
 	def test_forward_log_follows_the_bench(self):
 		text = FORWARD_SCRIPT.read_text(encoding="utf-8")

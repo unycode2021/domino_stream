@@ -54,6 +54,9 @@ FFMPEG_ASSETS = {
 
 STREAM_IO_PORT = 9003
 MEDIAMTX_WHIP_PORT = 8889
+UDP_READ_BUFFER = 1000000
+UDP_READ_BUFFER_FALLBACK = 212992
+_UDP_READ_BUFFER_RE = re.compile(r"^udpReadBufferSize:[ \t]*\d+[ \t]*$", re.MULTILINE)
 
 PROCFILE_BEGIN = "# DOMINO_STREAM_BEGIN"
 PROCFILE_END = "# DOMINO_STREAM_END"
@@ -71,7 +74,8 @@ RQ_COMMENT = "# Promote RQ enqueue_at jobs (kill-challenge force-stop) onto work
 HOST_NOTES = (
 	"Open UDP 8189 and TCP 8190 on the public host. WebRTC media does not pass through nginx.",
 	"Optional: raise net.core.rmem_max and net.core.rmem_default to at least 1000000, "
-	"then set udpReadBufferSize: 1000000 in mediamtx.yml and restart MediaMTX.",
+	"then run bench domino-stream-setup again and restart MediaMTX. Setup sets "
+	"udpReadBufferSize in mediamtx.yml to 1000000 when the host allows it, else 212992.",
 	"Cloudflare app credentials and the YouTube destination stay in Stream Settings and Domino Defaults.",
 	"After bench setup nginx, bench setup supervisor, or bench setup procfile, run bench domino-stream-setup again.",
 )
@@ -322,6 +326,10 @@ def ensure_runtime() -> RuntimeResult:
 	except Exception as exc:
 		result.errors.append(f"forward script: {exc}")
 	try:
+		_fit_mediamtx_config(root, result)
+	except Exception as exc:
+		result.errors.append(f"mediamtx.yml: {exc}")
+	try:
 		_wire_processes(root, bench, result)
 	except Exception as exc:
 		result.errors.append(f"process config: {exc}")
@@ -385,6 +393,34 @@ def _ensure_ffmpeg(root: Path) -> Path:
 		raise RuntimeError(f"{binary} does not include libx264")
 	stamp.write_text(expected + "\n", encoding="utf-8")
 	return binary
+
+
+def fit_udp_read_buffer(text: str, rmem_max: int | None) -> str:
+	"""Config text with udpReadBufferSize no larger than the host allows.
+
+	MediaMTX exits when the value exceeds net.core.rmem_max. An unreadable
+	limit gets the fallback.
+	"""
+	size = UDP_READ_BUFFER if rmem_max and rmem_max >= UDP_READ_BUFFER else UDP_READ_BUFFER_FALLBACK
+	return _UDP_READ_BUFFER_RE.sub(f"udpReadBufferSize: {size}", text, count=1)
+
+
+def _read_rmem_max() -> int | None:
+	try:
+		return int(Path("/proc/sys/net/core/rmem_max").read_text(encoding="utf-8").strip())
+	except (OSError, ValueError):
+		return None
+
+
+def _fit_mediamtx_config(root: Path, result: RuntimeResult) -> None:
+	config = root / "mediamtx.yml"
+	if not config.is_file():
+		return
+	current = config.read_text(encoding="utf-8")
+	updated = fit_udp_read_buffer(current, _read_rmem_max())
+	if updated != current:
+		config.write_text(updated, encoding="utf-8")
+		result.notes.append(f"Set udpReadBufferSize in {config} to fit net.core.rmem_max")
 
 
 def _ensure_forward_script(root: Path) -> None:

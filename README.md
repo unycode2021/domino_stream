@@ -34,7 +34,9 @@ sudo supervisorctl reread && sudo supervisorctl update
 ## Still set on the host
 
 - Open **UDP 8189** and **TCP 8190** on the public host. WebRTC media does not pass through nginx.
-- Optional: raise `net.core.rmem_max` and `net.core.rmem_default` to at least `1000000`, then set `udpReadBufferSize: 1000000` in `mediamtx.yml` and restart MediaMTX. The shipped value `212992` is what lets MediaMTX start on a default kernel.
+- Optional: raise `net.core.rmem_max` and `net.core.rmem_default` to at least `1000000`, then run `bench domino-stream-setup` again and restart MediaMTX. `mediamtx.yml` ships with `udpReadBufferSize: 1000000`; setup lowers it to `212992` when the host limit is smaller, because MediaMTX will not start above `rmem_max`.
+- `writeQueueSize: 4096` in `mediamtx.yml` lets the forward FFmpeg ride out a few seconds of slow RTMP upload. With the old 512, MediaMTX discarded video mid-GOP ("reader is too slow") and every frame until the next keyframe decoded corrupted.
+- For the forward to YouTube on a lossy, long round-trip link, enable BBR: `modprobe tcp_bbr`, then `net.core.default_qdisc=fq` and `net.ipv4.tcp_congestion_control=bbr` in `/etc/sysctl.d/`.
 - Cloudflare app id and secret, and the YouTube destination, stay in Stream Settings and Domino Defaults. They are account secrets, not install artifacts.
 
 See `docs/` on the Domino101 app for Connect / product guides once linked.

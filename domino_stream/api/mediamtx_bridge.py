@@ -20,7 +20,7 @@ import requests
 API_BASE = "http://127.0.0.1:9997"
 WHIP_UPSTREAM = "http://127.0.0.1:8889"
 _WHIP_PROXY_RE = re.compile(r"^/mediamtx/(program-[A-Za-z0-9-]+)(/whip(?:/.*)?)?$")
-_PATH_TOKEN_BYTES = 4
+_PATH_TOKEN_BYTES = 16
 _REQUEST_TIMEOUT = 10
 _RTMP_URL_RE = re.compile(r"rtmps?://\S+", re.IGNORECASE)
 
@@ -145,17 +145,24 @@ def resolve_ffmpeg_bin() -> str | None:
 	return None
 
 
+FORWARD_VIDEO_BITRATE = "3500k"
+
+
 def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | None = "opus") -> str:
 	"""FFmpeg argv MediaMTX runs when the WHIP publisher is readable.
 
 	``$RTSP_PORT`` and ``$MTX_PATH`` are expanded by MediaMTX, not by a shell.
 	The first token is the wrapper, which logs FFmpeg's wait status. Video is
-	re-encoded to a 30 fps baseline 4500 kbit/s CBR on the wall clock, so a
+	re-encoded to a 30 fps baseline 3500 kbit/s CBR on the wall clock, so a
 	dropped input frame is repeated instead of opening a hole in YouTube's
-	timeline. Opus is resampled onto a monotonic clock before AAC. Interleave
-	wait is 100 ms, so a timestamp glitch cannot park video frames. The probe
-	is long enough to see one keyframe. Mux delay stays at zero. ``nobuffer``
-	and ``genpts`` stay off.
+	timeline. 3500 kbit/s sits above the browser's typical delivered rate and
+	leaves headroom on a lossy RTMP upload, where a lower congestion window
+	after a loss would otherwise block FFmpeg and make MediaMTX discard video.
+	Opus is resampled onto a monotonic clock before AAC. Interleave wait is
+	100 ms, so a timestamp glitch cannot park video frames. The probe is long
+	enough to see one keyframe. Mux delay stays at zero. ``nobuffer`` and
+	``genpts`` stay off. ``-thread_queue_size`` is not passed: the pinned
+	FFmpeg accepts it only as a muxer option and exits when it precedes ``-i``.
 	"""
 	if not push_url or not ffmpeg_bin:
 		raise ValueError("push url and ffmpeg are required")
@@ -200,13 +207,13 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 		"-keyint_min",
 		"60",
 		"-b:v",
-		"4500k",
+		FORWARD_VIDEO_BITRATE,
 		"-minrate",
-		"4500k",
+		FORWARD_VIDEO_BITRATE,
 		"-maxrate",
-		"4500k",
+		FORWARD_VIDEO_BITRATE,
 		"-bufsize",
-		"4500k",
+		FORWARD_VIDEO_BITRATE,
 		"-x264-params",
 		"nal-hrd=cbr:force-cfr=1",
 		*forward_audio_args(audio_codec),
