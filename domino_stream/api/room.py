@@ -51,6 +51,13 @@ def _enforce_domino101_stream_policy(kind: str, table_id: str) -> None:
 		return
 	if kind == "play":
 		stream_hours.assert_viewer_may_play(table_id, user)
+	elif kind == "control":
+		# Stop / offline: the table's publishers, or moderators.
+		roles = set(frappe.get_roles(user))
+		if roles & {"System Manager", "Content Moderator"}:
+			return
+		if not stream_hours.user_may_publish_table(user, table_id):
+			frappe.throw(_("You don't have permission to control this stream."), frappe.PermissionError)
 	else:
 		stream_hours.assert_publisher_may_start(table_id, user)
 
@@ -689,6 +696,7 @@ def publisher_presence_offline(table_id: str):
 	pending) so an unanswered grace → delayed RQ job force-stops the room.
 	"""
 	require_stream_access()
+	_enforce_domino101_stream_policy("control", table_id)
 	if not table_id:
 		frappe.throw(_("table_id is required"))
 
@@ -1119,6 +1127,7 @@ def stop(table_id: str, publisher_session_id: str = None):
 	started it. Another Table Room window cannot end that stream.
 	"""
 	require_stream_access()
+	_enforce_domino101_stream_policy("control", table_id)
 	if not table_id:
 		frappe.throw(_("table_id is required"))
 

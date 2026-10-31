@@ -151,6 +151,20 @@ class TestRuntimeConfig(unittest.TestCase):
 		self.assertIn("web: bench serve --port 8000", once)
 		self.assertIn("watch: bench watch", once)
 		self.assertIn("/opt/bench/apps/domino_stream/bin/mediamtx", once)
+		self.assertEqual(once.count("domino_stream_media_agent:"), 1)
+		self.assertIn("/opt/bench/apps/domino_stream/domino_stream/media_agent.py", once)
+
+	def test_supervisor_config_runs_the_media_agent(self):
+		text = render_supervisor_config(
+			bench_name="frappe-bench",
+			bench_dir="/opt/bench",
+			app_dir="/opt/bench/apps/domino_stream",
+			user="adowie",
+			node=None,
+			site="",
+		)
+		self.assertIn("[program:frappe-bench-domino-stream-media-agent]", text)
+		self.assertIn("/opt/bench/env/bin/python -u /opt/bench/apps/domino_stream/domino_stream/media_agent.py", text)
 
 	def test_supervisor_config_names_the_three_programs(self):
 		text = render_supervisor_config(

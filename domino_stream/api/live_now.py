@@ -210,8 +210,15 @@ def post_www_webhook(table_id: str, *, live: bool, stream_name: str | None = Non
 		"source": "domino_stream",
 		"timestamp": int(time.time() * 1000),
 	}
+	headers = {}
+	creds = _www_credentials()
+	if creds["key"] and ":" in creds["key"] and not creds["key"].lower().startswith("bearer"):
+		headers["Authorization"] = f"token {creds['key']}"
+	secret = (frappe.conf.get("stream_webhook_secret") or "").strip()
+	if secret:
+		headers["X-Domino-Webhook-Token"] = secret
 	try:
-		response = requests.post(url, json=payload, timeout=15)
+		response = requests.post(url, json=payload, headers=headers, timeout=15)
 		ok = response.ok
 		if not ok:
 			logger.warning(

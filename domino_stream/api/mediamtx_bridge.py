@@ -17,6 +17,8 @@ from urllib.parse import quote, urlparse
 
 import requests
 
+# Single-bench defaults. Each path is served by the media node stored for it
+# (``media_nodes``); these apply when no media agent has registered.
 API_BASE = "http://127.0.0.1:9997"
 WHIP_UPSTREAM = "http://127.0.0.1:8889"
 _WHIP_PROXY_RE = re.compile(r"^/mediamtx/(program-[A-Za-z0-9-]+)(/whip(?:/.*)?)?$")
@@ -251,6 +253,11 @@ def mediamtx_upstream_path(request_path: str) -> str | None:
 	return f"/{match.group(1)}{match.group(2)}"
 
 
+def upstream_path_name(upstream_path: str) -> str:
+	"""MediaMTX path name from ``/<path>/whip...``."""
+	return (upstream_path or "").strip("/").split("/", 1)[0]
+
+
 def scrub_rtmp_urls(text: str) -> str:
 	return _RTMP_URL_RE.sub("rtmps://[redacted]", text or "")
 
@@ -292,12 +299,22 @@ def _cache():
 	return frappe.cache()
 
 
-def _request(method: str, path: str, payload: dict | None = None):
-	"""Call the local MediaMTX control API. None when the process is down."""
+def _nodes():
+	from domino_stream.api import media_nodes
+
+	return media_nodes
+
+
+def _api_base(node: dict | None) -> str:
+	return ((node or {}).get("mediamtx_api") or API_BASE).rstrip("/")
+
+
+def _request(method: str, path: str, payload: dict | None = None, node: dict | None = None):
+	"""Call a node's MediaMTX control API (local by default). None when it is down."""
 	try:
 		return requests.request(
 			method,
-			f"{API_BASE}{path}",
+			f"{_api_base(node)}{path}",
 			json=payload,
 			timeout=_REQUEST_TIMEOUT,
 		)
@@ -319,69 +336,85 @@ def _throw_rejected():
 	frappe.throw(_("The live bridge rejected the stream path."))
 
 
-def program_forward_status(match_id: str) -> dict:
-	"""Whether this match has a ready MediaMTX program path.
-
-	``known`` is false when the path list cannot be read. Callers must not
-	treat that as a dead forward.
-	"""
-	try:
-		prefix = program_path_prefix(match_id)
-	except ValueError:
-		return {"known": True, "forwarding": False, "match_id": match_id or ""}
+def _node_forwarding(prefix: str, node: dict) -> bool | None:
+	"""True or False for one node's ready paths; None when its list cannot be read."""
 	page = 0
 	while page < 20:
-		response = _request(
-			"GET", f"/v3/paths/list?page={page}&itemsPerPage=100"
-		)
+		response = _request("GET", f"/v3/paths/list?page={page}&itemsPerPage=100", node=node)
 		if response is None or not response.ok:
-			return {"known": False, "forwarding": False, "match_id": match_id}
+			return None
 		try:
 			data = response.json()
 		except Exception:
-			return {"known": False, "forwarding": False, "match_id": match_id}
+			return None
 		items = data.get("items") if isinstance(data, dict) else None
 		if not isinstance(items, list):
-			return {"known": False, "forwarding": False, "match_id": match_id}
+			return None
 		for item in items:
 			if not isinstance(item, dict):
 				continue
 			name = (item.get("name") or "").strip()
 			if name.startswith(prefix) and item.get("ready"):
-				return {"known": True, "forwarding": True, "match_id": match_id}
+				return True
 		page_count = data.get("pageCount") if isinstance(data, dict) else None
 		page += 1
 		if not items or (isinstance(page_count, int) and page >= page_count):
 			break
-	return {"known": True, "forwarding": False, "match_id": match_id}
+	return False
 
 
-def _path_names_for_match(match_id: str) -> list[str]:
-	prefix = program_path_prefix(match_id)
-	response = _request("GET", "/v3/config/paths/list?itemsPerPage=100")
-	if response is None or not response.ok:
-		return []
+def program_forward_status(match_id: str) -> dict:
+	"""Whether this match has a ready MediaMTX program path on any media node.
+
+	``known`` is false when a node's path list cannot be read and no node is
+	forwarding. Callers must not treat that as a dead forward.
+	"""
 	try:
-		data = response.json()
-	except Exception:
-		return []
-	items = data.get("items") if isinstance(data, dict) else None
-	if not isinstance(items, list):
-		return []
-	names = []
-	for item in items:
-		if not isinstance(item, dict):
+		prefix = program_path_prefix(match_id)
+	except ValueError:
+		return {"known": True, "forwarding": False, "match_id": match_id or ""}
+	known = True
+	for node in _nodes().nodes_or_local():
+		state = _node_forwarding(prefix, node)
+		if state:
+			return {"known": True, "forwarding": True, "match_id": match_id}
+		if state is None:
+			known = False
+	return {"known": known, "forwarding": False, "match_id": match_id}
+
+
+def _path_names_for_match(match_id: str) -> list[tuple[str, dict]]:
+	"""(path name, node) for every configured path of this match, across nodes."""
+	prefix = program_path_prefix(match_id)
+	found = []
+	for node in _nodes().nodes_or_local():
+		response = _request("GET", "/v3/config/paths/list?itemsPerPage=100", node=node)
+		if response is None or not response.ok:
 			continue
-		name = (item.get("name") or "").strip()
-		if name.startswith(prefix):
-			names.append(name)
-	return names
+		try:
+			data = response.json()
+		except Exception:
+			continue
+		items = data.get("items") if isinstance(data, dict) else None
+		if not isinstance(items, list):
+			continue
+		for item in items:
+			if not isinstance(item, dict):
+				continue
+			name = (item.get("name") or "").strip()
+			if name.startswith(prefix):
+				found.append((name, node))
+	return found
 
 
-def _delete_path(path_name: str) -> None:
+def _delete_path(path_name: str, node: dict | None = None) -> None:
 	if not path_name:
 		return
-	_request("DELETE", f"/v3/config/paths/delete/{quote(path_name, safe='')}")
+	if node is None:
+		node = _nodes().path_node(path_name)
+	if node is not None:
+		_request("DELETE", f"/v3/config/paths/delete/{quote(path_name, safe='')}", node=node)
+	_nodes().forget_path_node(path_name)
 
 
 def _store_path(match_id: str, path_name: str, session_id: str = "") -> None:
@@ -421,11 +454,14 @@ def _cached_path_name(match_id: str, session_id: str = "") -> str:
 	return ""
 
 
-def _advertise_origin(origin: str) -> None:
+def _advertise_origin(origin: str, node: dict | None = None) -> None:
+	"""ICE host for a node without its own public host (single bench: the site host)."""
+	if node and node.get("public_host"):
+		return
 	host = (urlparse(origin or "").hostname or "").strip()
 	if not host or host in ("localhost", "127.0.0.1", "::1"):
 		return
-	_request("PATCH", "/v3/config/global/patch", {"webrtcAdditionalHosts": [host]})
+	_request("PATCH", "/v3/config/global/patch", {"webrtcAdditionalHosts": [host]}, node=node)
 
 
 def open_program_path(
@@ -465,19 +501,22 @@ def open_program_path(
 		# The pre-session cache must not keep a second FFmpeg on the same ingest.
 		_close_legacy_path(match_id)
 	path_name = program_path_name(match_id, secrets.token_hex(_PATH_TOKEN_BYTES))
+	node = _nodes().pick_node()
 	response = _request(
 		"POST",
 		f"/v3/config/paths/add/{quote(path_name, safe='')}",
 		program_path_config(command),
+		node=node,
 	)
 	if response is None:
 		_throw_bridge_down()
 	if not response.ok:
-		_delete_path(path_name)
+		_delete_path(path_name, node=node)
 		_throw_rejected()
 
+	_nodes().remember_path_node(path_name, node)
 	_store_path(match_id, path_name, session_id)
-	_advertise_origin(public_origin)
+	_advertise_origin(public_origin, node)
 	return {
 		"success": True,
 		"match_id": match_id,
@@ -489,10 +528,11 @@ def open_program_path(
 
 
 def proxy_whip_request() -> None:
-	"""Forward browser WHIP to local MediaMTX. No-op for every other request.
+	"""Forward browser WHIP to the MediaMTX node that holds the path. No-op otherwise.
 
 	Registered as a before_request hook so /mediamtx/ works on the existing
-	site proxy. Nginx can also send /mediamtx/ straight to MediaMTX.
+	site proxy. A single bench can also send /mediamtx/ straight to MediaMTX
+	in nginx; with several media nodes /mediamtx/ must reach Gunicorn.
 	"""
 	import frappe
 	from werkzeug.exceptions import HTTPException
@@ -504,8 +544,14 @@ def proxy_whip_request() -> None:
 	upstream_path = mediamtx_upstream_path(getattr(request, "path", "") or "")
 	if not upstream_path:
 		return
+	node = _nodes().path_node(upstream_path_name(upstream_path))
+	if node is None:
+		exc = HTTPException()
+		exc.response = Response("The live bridge is not running.", status=502, mimetype="text/plain")
+		raise exc
 	query = request.query_string.decode() if request.query_string else ""
-	url = f"{WHIP_UPSTREAM}{upstream_path}"
+	whip_base = (node.get("whip_upstream") or WHIP_UPSTREAM).rstrip("/")
+	url = f"{whip_base}{upstream_path}"
 	if query:
 		url = f"{url}?{query}"
 	headers = {}
@@ -570,20 +616,20 @@ def close_program_path(match_id: str, session_id: str = "") -> dict:
 	if not safe_match_id(match_id):
 		return {"success": True, "closed": False}
 	session = safe_session_id(session_id)
-	names = []
+	targets: list[tuple[str, dict | None]] = []
 	cached = _cached_path_name(match_id, session)
 	if cached:
-		names.append(cached)
+		targets.append((cached, None))
 	if not session:
 		try:
-			names.extend(_path_names_for_match(match_id))
+			targets.extend(_path_names_for_match(match_id))
 		except Exception:
 			pass
 	seen = []
-	for name in names:
+	for name, node in targets:
 		if name and name not in seen:
 			seen.append(name)
-			_delete_path(name)
+			_delete_path(name, node=node)
 	_drop_path(match_id, session)
 	return {
 		"success": True,

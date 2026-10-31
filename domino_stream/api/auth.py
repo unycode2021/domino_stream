@@ -24,6 +24,17 @@ def grant_publisher_user() -> str:
 	return (frappe.flags.get(GRANT_PUBLISHER_FLAG) or "").strip()
 
 
+def _requested_table_id() -> str:
+	table_id = frappe.form_dict.get("table_id")
+	if not table_id and frappe.request:
+		try:
+			body = frappe.request.get_json(force=True, silent=True) or {}
+			table_id = body.get("table_id") if isinstance(body, dict) else None
+		except Exception:
+			table_id = None
+	return str(table_id or "").strip()
+
+
 def require_stream_access():
 	"""
 	Allow logged-in users, inbound API key, a valid presence token, or an
@@ -46,7 +57,10 @@ def require_stream_access():
 	if presence_token:
 		from domino_stream.api.realtime_pub import resolve_presence_token
 
-		if resolve_presence_token(presence_token):
+		data = resolve_presence_token(presence_token)
+		# A presence token belongs to one table; it never authorises another.
+		requested = _requested_table_id()
+		if data and (not requested or str(data.get("table_id") or "") == requested):
 			return
 		frappe.throw(_("Invalid Domino Stream presence token"), frappe.AuthenticationError)
 

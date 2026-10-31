@@ -20,6 +20,7 @@ from domino_stream.api.mediamtx_bridge import (
 	rtmps_push_url,
 	scrub_rtmp_urls,
 	session_cache_key,
+	upstream_path_name,
 	whip_public_url,
 )
 
@@ -37,6 +38,48 @@ class TestMediaMtxBridge(unittest.TestCase):
 
 	def test_path_name_strips_punctuation(self):
 		self.assertEqual(program_path_name("MCH/00967", "aa-bb"), "program-MCH00967-aabb")
+
+	def test_upstream_path_name_finds_the_node_key(self):
+		self.assertEqual(upstream_path_name("/program-MCH1-ab12/whip"), "program-MCH1-ab12")
+		self.assertEqual(upstream_path_name("/program-MCH1-ab12/whip/sess-9"), "program-MCH1-ab12")
+
+	def test_forward_status_reads_every_media_node(self):
+		from domino_stream.api import mediamtx_bridge as bridge
+
+		node_a = {"id": "a", "mediamtx_api": "http://a:9997"}
+		node_b = {"id": "b", "mediamtx_api": "http://b:9997"}
+		seen = []
+
+		def fake_forwarding(prefix, node):
+			seen.append(node["id"])
+			return node["id"] == "b"
+
+		class Nodes:
+			@staticmethod
+			def nodes_or_local():
+				return [node_a, node_b]
+
+		with patch.object(bridge, "_nodes", return_value=Nodes), patch.object(
+			bridge, "_node_forwarding", side_effect=fake_forwarding
+		):
+			status = bridge.program_forward_status("MCH1")
+		self.assertTrue(status["forwarding"])
+		self.assertEqual(seen, ["a", "b"])
+
+	def test_forward_status_unknown_when_a_node_cannot_be_read(self):
+		from domino_stream.api import mediamtx_bridge as bridge
+
+		class Nodes:
+			@staticmethod
+			def nodes_or_local():
+				return [{"id": "a"}, {"id": "b"}]
+
+		with patch.object(bridge, "_nodes", return_value=Nodes), patch.object(
+			bridge, "_node_forwarding", side_effect=[False, None]
+		):
+			status = bridge.program_forward_status("MCH1")
+		self.assertFalse(status["forwarding"])
+		self.assertFalse(status["known"])
 
 	def test_rtmps_push_url_joins_key(self):
 		url = rtmps_push_url("rtmps://live.cloudflare.com:443/live/", "abc123")

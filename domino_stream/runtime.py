@@ -12,6 +12,7 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
 import subprocess
 import tarfile
@@ -67,8 +68,10 @@ LOCATIONS_END = "# DOMINO_STREAM_LOCATIONS_END"
 PROCFILE_KEYS = (
 	"domino_stream_io",
 	"domino_stream_mediamtx",
+	"domino_stream_media_agent",
 	"domino_stream_rq_scheduler",
 )
+AGENT_TOKEN_KEY = "domino_media_agent_token"
 RQ_COMMENT = "# Promote RQ enqueue_at jobs (kill-challenge force-stop) onto worker queues"
 
 HOST_NOTES = (
@@ -143,6 +146,7 @@ def render_procfile_block(*, node: str, app_dir: str, mediamtx: str, python: str
 			PROCFILE_BEGIN,
 			f"domino_stream_io: {node} {app_dir}/socketio.js",
 			f"domino_stream_mediamtx: {mediamtx} {app_dir}/mediamtx.yml",
+			f"domino_stream_media_agent: {python} {app_dir}/domino_stream/media_agent.py",
 			f"domino_stream_rq_scheduler: {python} {app_dir}/rq_scheduler.py",
 			PROCFILE_END,
 		]
@@ -266,6 +270,18 @@ def render_supervisor_config(
 		f"directory={bench_dir}",
 		"startretries=10",
 		"",
+		f"[program:{bench_name}-domino-stream-media-agent]",
+		f"command={bench_dir}/env/bin/python -u {app_dir}/domino_stream/media_agent.py",
+		"priority=4",
+		"autostart=true",
+		"autorestart=true",
+		f"stdout_logfile={logs}/domino-media-agent.log",
+		f"stderr_logfile={logs}/domino-media-agent.error.log",
+		f"user={user}",
+		f"directory={bench_dir}",
+		"stopsignal=TERM",
+		"startretries=10",
+		"",
 	]
 	if node:
 		blocks.extend(
@@ -329,6 +345,10 @@ def ensure_runtime() -> RuntimeResult:
 		_fit_mediamtx_config(root, result)
 	except Exception as exc:
 		result.errors.append(f"mediamtx.yml: {exc}")
+	try:
+		_ensure_agent_token(bench, result)
+	except Exception as exc:
+		result.errors.append(f"media agent token: {exc}")
 	try:
 		_wire_processes(root, bench, result)
 	except Exception as exc:
@@ -423,6 +443,19 @@ def _fit_mediamtx_config(root: Path, result: RuntimeResult) -> None:
 		result.notes.append(f"Set udpReadBufferSize in {config} to fit net.core.rmem_max")
 
 
+def _ensure_agent_token(bench: Path, result: RuntimeResult) -> None:
+	"""Shared secret for the media agent's relay API and chunk port. Kept if already set."""
+	path = bench / "sites" / "common_site_config.json"
+	data = _read_common_config(bench)
+	if str(data.get(AGENT_TOKEN_KEY) or "").strip():
+		return
+	data[AGENT_TOKEN_KEY] = secrets.token_hex(32)
+	partial = path.with_name(path.name + ".partial")
+	partial.write_text(json.dumps(data, indent=1, sort_keys=True), encoding="utf-8")
+	os.replace(partial, path)
+	result.notes.append(f"Set {AGENT_TOKEN_KEY} in {path}")
+
+
 def _ensure_forward_script(root: Path) -> None:
 	script = root / "mediamtx-forward.sh"
 	if not script.is_file():
@@ -494,6 +527,7 @@ def _write_if_changed(path: Path, text: str) -> None:
 def _link_supervisor(source: Path, bench: Path, bench_name: str, result: RuntimeResult) -> None:
 	names = (
 		f"{bench_name}-domino-stream-mediamtx",
+		f"{bench_name}-domino-stream-media-agent",
 		f"{bench_name}-domino-stream-io",
 		f"{bench_name}-domino-stream-rq-scheduler",
 	)
