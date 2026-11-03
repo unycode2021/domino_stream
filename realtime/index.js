@@ -54,7 +54,15 @@ const subscriber = get_redis_subscriber();
 })();
 
 const port = conf.domino_stream_io_port || 9003;
-io.listen(port);
+// Only nginx (127.0.0.1) needs this port. A dev box that connects to it directly can set
+// "realtime_bind_host": "0.0.0.0" in sites/common_site_config.json.
+const bind_host = conf.realtime_bind_host || "127.0.0.1";
+const http_server = require("http").createServer((req, res) => {
+	res.writeHead(404);
+	res.end();
+});
+io.attach(http_server);
+http_server.listen(port, bind_host);
 console.log(
-	`domino_stream socket service listening on :${port} path=${SOCKET_PATH} nsp=/${SOCKET_NAMESPACE}`
+	`domino_stream socket service listening on ${bind_host}:${port} path=${SOCKET_PATH} nsp=/${SOCKET_NAMESPACE}`
 );
