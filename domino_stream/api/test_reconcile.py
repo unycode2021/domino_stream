@@ -32,6 +32,59 @@ class TestPublisherHeartbeatHelpers(FrappeTestCase):
 		self.assertFalse(publisher_heartbeat_fresh(frappe._dict(), grace=35))
 
 
+class TestPublisherHeartbeatWrite(FrappeTestCase):
+	def _room(self):
+		return frappe._dict(
+			name="SR-TEST",
+			status="Live",
+			publisher_session_id="sess-1",
+			publisher_socket_present=0,
+		)
+
+	def test_heartbeat_sets_fields_without_save(self):
+		from domino_stream.api import room as room_api
+
+		with patch.object(room_api, "require_stream_access"), patch.object(
+			room_api, "_acting_user", return_value="pub@example.com"
+		), patch.object(room_api.frappe.db, "get_value", return_value=self._room()), patch.object(
+			room_api.frappe.db, "set_value"
+		) as set_value, patch.object(room_api.frappe.db, "commit"), patch.object(
+			room_api.frappe, "get_doc"
+		) as get_doc:
+			out = room_api.publisher_heartbeat("T-1", session_id="sess-1", via="socket")
+
+		get_doc.assert_not_called()
+		set_value.assert_called_once()
+		args, kwargs = set_value.call_args
+		self.assertEqual(args[0], "Stream Room")
+		self.assertEqual(args[1], "SR-TEST")
+		self.assertFalse(kwargs.get("update_modified", True))
+		fields = args[2]
+		self.assertIn("last_publisher_heartbeat", fields)
+		self.assertIsNone(fields["tracks_inactive_since"])
+		self.assertEqual(fields["publisher_socket_present"], 1)
+		self.assertEqual(fields["publisher_user"], "pub@example.com")
+		self.assertEqual(out["session_id"], "sess-1")
+		self.assertEqual(out["publisher_socket_present"], 1)
+
+	def test_http_heartbeat_keeps_socket_flag(self):
+		from domino_stream.api import room as room_api
+
+		room = self._room()
+		room.publisher_socket_present = 1
+		with patch.object(room_api, "require_stream_access"), patch.object(
+			room_api, "_acting_user", return_value="Guest"
+		), patch.object(room_api.frappe.db, "get_value", return_value=room), patch.object(
+			room_api.frappe.db, "set_value"
+		) as set_value, patch.object(room_api.frappe.db, "commit"):
+			out = room_api.publisher_heartbeat("T-1")
+
+		fields = set_value.call_args[0][2]
+		self.assertNotIn("publisher_socket_present", fields)
+		self.assertNotIn("publisher_user", fields)
+		self.assertEqual(out["publisher_socket_present"], 1)
+
+
 class TestLocalTracksState(FrappeTestCase):
 	def test_missing_session_is_dead(self):
 		from domino_stream.api.session_health import local_tracks_state
