@@ -156,14 +156,23 @@ def publisher_heartbeat_fresh(room, grace: int | None = None) -> bool:
 	return age <= grace
 
 
-def _touch_publisher_heartbeat(room, *, via_socket: bool = False):
-	room.last_publisher_heartbeat = now_datetime()
-	room.tracks_inactive_since = None
+def _publisher_heartbeat_fields(*, via_socket: bool = False) -> dict:
+	"""Fields a publisher heartbeat writes on Stream Room."""
+	fields = {
+		"last_publisher_heartbeat": now_datetime(),
+		"tracks_inactive_since": None,
+	}
 	if via_socket:
-		room.publisher_socket_present = 1
+		fields["publisher_socket_present"] = 1
 	user = _acting_user()
 	if user and user != "Guest":
-		room.publisher_user = user
+		fields["publisher_user"] = user
+	return fields
+
+
+def _touch_publisher_heartbeat(room, *, via_socket: bool = False):
+	for fieldname, value in _publisher_heartbeat_fields(via_socket=via_socket).items():
+		setattr(room, fieldname, value)
 
 
 def _infer_stop_caller() -> str:
@@ -547,7 +556,7 @@ def publisher_heartbeat(table_id: str, session_id: str = None, via: str = None):
 	room = frappe.db.get_value(
 		"Stream Room",
 		{"table_id": table_id},
-		["name", "status", "publisher_session_id"],
+		["name", "status", "publisher_session_id", "publisher_socket_present"],
 		as_dict=True,
 	)
 	if not room:
@@ -557,18 +566,22 @@ def publisher_heartbeat(table_id: str, session_id: str = None, via: str = None):
 	if session_id and room.publisher_session_id and session_id != room.publisher_session_id:
 		frappe.throw(_("session_id does not match the current publisher session"))
 
-	doc = frappe.get_doc("Stream Room", room.name)
-	_touch_publisher_heartbeat(doc, via_socket=(via or "").lower() == "socket")
-	doc.save(ignore_permissions=True)
+	# Write only the heartbeat columns. doc.save() here raced the socket and HTTP
+	# heartbeats (and other saves) on the same row and raised TimestampMismatchError.
+	# Stream Room has no controller hooks; leaving `modified` alone also keeps
+	# concurrent doc.save() callers from tripping the timestamp check, and skips a
+	# Version row per heartbeat (track_changes).
+	fields = _publisher_heartbeat_fields(via_socket=(via or "").lower() == "socket")
+	frappe.db.set_value("Stream Room", room.name, fields, update_modified=False)
 	frappe.db.commit()
 
 	return {
 		"success": True,
 		"table_id": table_id,
-		"session_id": doc.publisher_session_id,
-		"last_publisher_heartbeat": str(doc.last_publisher_heartbeat),
+		"session_id": room.publisher_session_id,
+		"last_publisher_heartbeat": str(fields["last_publisher_heartbeat"]),
 		"grace_seconds": get_heartbeat_grace_seconds(),
-		"publisher_socket_present": cint(doc.publisher_socket_present),
+		"publisher_socket_present": cint(fields.get("publisher_socket_present", room.publisher_socket_present)),
 	}
 
 
