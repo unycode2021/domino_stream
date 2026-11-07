@@ -977,7 +977,7 @@ def open_kill_challenge(room, reason: str, *, dry_run: bool = False) -> dict:
 		from domino_stream.api.events import emit_stream_event
 
 		emit_stream_event(
-			"kill_challenge",
+			"challenge",
 			f"Kill challenge opened for {table_id}: {reason}",
 			table_id=table_id,
 			room=room_name,
