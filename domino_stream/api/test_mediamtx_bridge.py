@@ -43,6 +43,24 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertEqual(upstream_path_name("/program-MCH1-ab12/whip"), "program-MCH1-ab12")
 		self.assertEqual(upstream_path_name("/program-MCH1-ab12/whip/sess-9"), "program-MCH1-ab12")
 
+	def test_no_node_uses_this_bench_mediamtx_from_site_config(self):
+		from domino_stream.api import mediamtx_bridge as bridge
+
+		class Nodes:
+			@staticmethod
+			def local_node():
+				return {"mediamtx_api": "http://127.0.0.1:19997/", "whip_upstream": "http://127.0.0.1:18889"}
+
+		with patch.object(bridge, "_nodes", return_value=Nodes):
+			self.assertEqual(bridge._api_base(None), "http://127.0.0.1:19997")
+			self.assertEqual(bridge._api_base({"mediamtx_api": "http://b:9997"}), "http://b:9997")
+
+	def test_no_node_falls_back_to_the_default_port(self):
+		from domino_stream.api import mediamtx_bridge as bridge
+
+		with patch.object(bridge, "_nodes", side_effect=RuntimeError("no frappe")):
+			self.assertEqual(bridge._api_base(None), "http://127.0.0.1:9997")
+
 	def test_forward_status_reads_every_media_node(self):
 		from domino_stream.api import mediamtx_bridge as bridge
 

@@ -305,8 +305,17 @@ def _nodes():
 	return media_nodes
 
 
+def _local_node() -> dict:
+	"""This bench's MediaMTX (site_config ``domino_mediamtx_api`` / ``domino_mediamtx_whip``)."""
+	try:
+		return _nodes().local_node()
+	except Exception:
+		return {"mediamtx_api": API_BASE, "whip_upstream": WHIP_UPSTREAM}
+
+
 def _api_base(node: dict | None) -> str:
-	return ((node or {}).get("mediamtx_api") or API_BASE).rstrip("/")
+	base = (node or {}).get("mediamtx_api") or _local_node().get("mediamtx_api") or API_BASE
+	return base.rstrip("/")
 
 
 def _request(method: str, path: str, payload: dict | None = None, node: dict | None = None):
@@ -550,7 +559,7 @@ def proxy_whip_request() -> None:
 		exc.response = Response("The live bridge is not running.", status=502, mimetype="text/plain")
 		raise exc
 	query = request.query_string.decode() if request.query_string else ""
-	whip_base = (node.get("whip_upstream") or WHIP_UPSTREAM).rstrip("/")
+	whip_base = (node.get("whip_upstream") or _local_node().get("whip_upstream") or WHIP_UPSTREAM).rstrip("/")
 	url = f"{whip_base}{upstream_path}"
 	if query:
 		url = f"{url}?{query}"
