@@ -280,3 +280,70 @@ def reconcile_live_rooms(dry_run: int | str | bool = 0):
 	if dry:
 		result["decisions"] = decisions
 	return result
+
+
+# Safety net for abandoned streams (scheduled every 2 minutes; see hooks.py).
+# The normal end is presence offline → kill challenge. If that offline call never lands
+# (socket service down, token refused), nothing else ends the room and it stays Live.
+# This only acts on a clearly abandoned room and only opens a kill challenge: a working
+# publisher answers keep_alive and keeps streaming.
+ABANDON_AFTER_SECONDS = 180
+
+
+def _abandon_age_seconds(row: dict) -> float | None:
+	"""Seconds since the last publisher heartbeat, else since the room last changed."""
+	age = _heartbeat_age_seconds(row)
+	if age is not None:
+		return age
+	modified = row.get("modified")
+	if not modified:
+		return None
+	return float(time_diff_in_seconds(now_datetime(), get_datetime(modified)))
+
+
+def abandoned_room_reason(row: dict, abandon_after: int, session_dead) -> str | None:
+	"""Kill-challenge reason when ``row`` is abandoned, else None.
+
+	``session_dead`` is a callable(publisher_session_id) -> True / False / None
+	(None = could not tell; never challenge on that).
+	"""
+	status, _ = _challenge_status(row)
+	if status == "pending":
+		return None
+	age = _abandon_age_seconds(row)
+	if age is None or age < abandon_after:
+		return None
+	if session_dead(row.get("publisher_session_id")) is not True:
+		return None
+	return f"abandoned: no publisher heartbeat for {int(age)}s and SFU session dead"
+
+
+def challenge_abandoned_rooms():
+	"""Open a kill challenge on Live rooms with no heartbeat for minutes and a dead SFU session."""
+	abandon_after = max(ABANDON_AFTER_SECONDS, get_heartbeat_grace_seconds())
+	rows = frappe.get_all(
+		"Stream Room",
+		filters={"status": "Live"},
+		fields=[
+			"name",
+			"table_id",
+			"modified",
+			"last_publisher_heartbeat",
+			"publisher_session_id",
+			"kill_challenge_id",
+			"kill_challenge_expires_at",
+			"kill_challenge_reason",
+		],
+	)
+	challenged = []
+	for row in rows:
+		try:
+			reason = abandoned_room_reason(row, abandon_after, session_looks_dead)
+			if not reason:
+				continue
+			open_kill_challenge(row, reason)
+			challenged.append(row.get("table_id"))
+			logger.info("abandoned room %s (%s): %s", row.get("name"), row.get("table_id"), reason)
+		except Exception:
+			logger.exception("abandoned room check failed for %s", row.get("name"))
+	return {"checked": len(rows), "challenged": challenged}

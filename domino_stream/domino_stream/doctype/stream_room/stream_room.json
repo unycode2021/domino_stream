@@ -27,6 +27,7 @@
   "kill_challenge_id",
   "kill_challenge_expires_at",
   "kill_challenge_reason",
+  "presence_token_hash",
   "last_error"
  ],
  "fields": [
@@ -157,13 +158,22 @@
    "label": "Kill Challenge Reason"
   },
   {
+   "description": "SHA-256 of the publisher's current presence token. Lets the socket service's offline / keep_alive calls authenticate when the Redis copy is gone.",
+   "fieldname": "presence_token_hash",
+   "fieldtype": "Data",
+   "hidden": 1,
+   "label": "Presence Token Hash",
+   "no_copy": 1,
+   "read_only": 1
+  },
+  {
    "fieldname": "last_error",
    "fieldtype": "Small Text",
    "label": "Last Error"
   }
  ],
  "links": [],
- "modified": "2026-11-11 12:00:00.000000",
+ "modified": "2026-11-11 17:00:00.000000",
  "modified_by": "Administrator",
  "module": "Domino Stream",
  "name": "Stream Room",

@@ -18,4 +18,11 @@ website_route_rules = [
 # Publisher force-kill: presence offline → kill_challenge → RQ delayed job
 # (force_stop_if_challenge_expired). No minute reconcile cron — see install.py
 # (legacy reconcile_live_rooms jobs are kept Stopped).
+# Safety net only: a Live room with no heartbeat for minutes and a dead SFU session gets
+# a kill challenge (never an immediate stop), for when the offline call never lands.
+scheduler_events = {
+	"cron": {
+		"*/2 * * * *": ["domino_stream.api.reconcile.challenge_abandoned_rooms"],
+	},
+}
 
