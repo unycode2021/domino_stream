@@ -110,6 +110,15 @@ def add_tracks(session_id: str, tracks: list, session_description: dict | None =
 	return _request("POST", f"/sessions/{session_id}/tracks/new", body)
 
 
+def update_tracks(session_id: str, tracks: list) -> dict:
+	"""PUT /sessions/{id}/tracks/update — reuse transceivers, e.g. switch a pulled simulcast layer.
+
+	Each entry: ``{"location": "remote", "sessionId", "trackName", "mid": <receiving mid>,
+	"simulcast": {"preferredRid", "priorityOrdering", "ridNotAvailable"}}``.
+	"""
+	return _request("PUT", f"/sessions/{session_id}/tracks/update", {"tracks": tracks})
+
+
 def renegotiate(session_id: str, session_description: dict) -> dict:
 	"""PUT /sessions/{id}/renegotiate"""
 	return _request(

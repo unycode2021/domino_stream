@@ -12,7 +12,7 @@ from frappe import _
 from frappe.utils import cint, get_datetime, now_datetime, time_diff_in_seconds
 
 from domino_stream.api.auth import require_stream_access
-from domino_stream.api import live_now, pipeline, sfu_client
+from domino_stream.api import live_now, pipeline, sfu_client, simulcast
 from domino_stream.api.session_health import (
 	kill_reason_for_observation,
 	observation_action,
@@ -474,6 +474,9 @@ def publish_tracks(
 	room.audio_track_name = audio_track_name
 	room.video_mid = str(video_mid) if video_mid not in (None, "") else None
 	room.audio_mid = str(audio_mid) if audio_mid not in (None, "") else None
+	if sdp:
+		# Simulcast publishers advertise a=rid:f/h/q send; single-layer publishers advertise none.
+		room.simulcast_rids = simulcast.rids_to_field(simulcast.parse_send_rids(sdp))
 	room.status = "Live"
 	room.last_error = ""
 	_touch_publisher_heartbeat(room)
@@ -1038,11 +1041,15 @@ def prepare_play(table_id: str, sdp: str = None, sdp_type: str = "offer"):
 
 
 @frappe.whitelist(allow_guest=True)
-def pull_play_tracks(table_id: str, session_id: str = None):
+def pull_play_tracks(table_id: str, session_id: str = None, viewer_kind: str = None):
 	"""
 	Pull publisher remote tracks onto an ICE-connected spectator session (tracks/new).
 
 	Must be called after prepare_play answer is applied and PeerConnection ICE is connected.
+
+	``viewer_kind`` comes from www: ``guest`` pulls the ``h`` (360p) simulcast layer, anyone
+	else ``f`` (720p), with ``asciibetical`` fallback. A single-layer publisher gets no
+	``simulcast`` object, so every viewer receives its one layer.
 	"""
 	require_stream_access()
 	if not table_id:
@@ -1061,6 +1068,7 @@ def pull_play_tracks(table_id: str, session_id: str = None):
 			"audio_track_name",
 			"video_track_id",
 			"audio_track_id",
+			"simulcast_rids",
 		],
 		as_dict=True,
 	)
@@ -1079,19 +1087,22 @@ def pull_play_tracks(table_id: str, session_id: str = None):
 	)
 	sub_tracks = pipe.get("tracks_for_subscribers") or {}
 
-	# Build remote track pull list (Cloudflare: location=remote + sessionId + trackName only)
+	# Build remote track pull list (Cloudflare: location=remote + sessionId + trackName,
+	# plus a simulcast layer preference on the video entry when the publisher sends layers)
 	remote_tracks = []
 	vname = sub_tracks.get("video_track_name") or room.video_track_name
 	aname = sub_tracks.get("audio_track_name") or room.audio_track_name
 	pub_session = sub_tracks.get("publisher_session_id") or room.publisher_session_id
+	layer = simulcast.simulcast_for(viewer_kind, simulcast.rids_from_field(room.simulcast_rids))
 	if vname:
-		remote_tracks.append(
-			{
-				"location": "remote",
-				"sessionId": pub_session,
-				"trackName": vname,
-			}
-		)
+		video_entry = {
+			"location": "remote",
+			"sessionId": pub_session,
+			"trackName": vname,
+		}
+		if layer:
+			video_entry["simulcast"] = layer
+		remote_tracks.append(video_entry)
 	if aname:
 		remote_tracks.append(
 			{
@@ -1118,6 +1129,7 @@ def pull_play_tracks(table_id: str, session_id: str = None):
 		"requiresImmediateRenegotiation": requires_reneg,
 		"tracks": pull.get("tracks"),
 		"remote_tracks": remote_tracks,
+		"simulcast_rid": layer["preferredRid"] if layer else None,
 		"message": "Apply sessionDescription; renegotiate with answer when type is offer",
 	}
 

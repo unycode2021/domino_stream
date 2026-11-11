@@ -24,6 +24,14 @@ def grant_publisher_user() -> str:
 	return (frappe.flags.get(GRANT_PUBLISHER_FLAG) or "").strip()
 
 
+PLAY_AUTHORIZED_FLAG = "domino_stream_play_authorized"
+
+
+def play_authorized_in_process() -> bool:
+	"""www set this for an in-process spectator call it already gated (guest token + binding)."""
+	return bool(frappe.flags.get(PLAY_AUTHORIZED_FLAG))
+
+
 def _requested_table_id() -> str:
 	table_id = frappe.form_dict.get("table_id")
 	if not table_id and frappe.request:
@@ -49,6 +57,8 @@ def require_stream_access():
 		# Authenticated Frappe session (Desk or JWT user)
 		return
 	if grant_publisher_user():
+		return
+	if play_authorized_in_process():
 		return
 
 	presence_token = (

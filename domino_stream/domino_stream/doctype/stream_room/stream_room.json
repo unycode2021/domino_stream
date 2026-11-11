@@ -17,6 +17,7 @@
   "audio_track_name",
   "video_mid",
   "audio_mid",
+  "simulcast_rids",
   "section_meta",
   "www_notified_live",
   "last_publisher_heartbeat",
@@ -98,6 +99,13 @@
    "label": "Audio Mid"
   },
   {
+   "description": "Simulcast RIDs the publisher advertised for video (e.g. f,h,q). Empty = single layer.",
+   "fieldname": "simulcast_rids",
+   "fieldtype": "Data",
+   "label": "Simulcast RIDs",
+   "read_only": 1
+  },
+  {
    "fieldname": "section_meta",
    "fieldtype": "Section Break",
    "label": "Meta"
@@ -155,7 +163,7 @@
   }
  ],
  "links": [],
- "modified": "2026-09-18 00:00:00.000000",
+ "modified": "2026-11-11 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Domino Stream",
  "name": "Stream Room",
