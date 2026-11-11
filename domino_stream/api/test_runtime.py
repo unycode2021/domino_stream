@@ -144,6 +144,17 @@ class TestRuntimeConfig(unittest.TestCase):
 		self.assertEqual(once.count("upstream demo-mediamtx "), 1)
 		self.assertEqual(once, apply_nginx_config(once, "demo", io_port=9003))
 
+	def test_nginx_never_adds_a_location_the_file_already_has(self):
+		own = NGINX.replace(
+			"\tlocation / {",
+			"\tlocation /domino-stream-socket.io {\n\t\tproxy_pass http://demo-domino-stream-io-server;\n\t}\n\n\tlocation / {",
+			1,
+		)
+		once = apply_nginx_config(own, "demo", io_port=9003)
+		self.assertEqual(once.count("location /domino-stream-socket.io"), 1)
+		self.assertEqual(once.count("location /mediamtx/"), 1)
+		self.assertEqual(once, apply_nginx_config(once, "demo", io_port=9003))
+
 	def test_hand_edited_nginx_is_left_in_place(self):
 		self.assertEqual(apply_nginx_config(HAND_EDITED_NGINX, "frappe-bench"), HAND_EDITED_NGINX)
 
