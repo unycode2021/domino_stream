@@ -206,10 +206,9 @@ def _upstreams_outside_markers(text: str, bench_name: str) -> tuple[str, ...]:
 	)
 
 
-def render_locations(bench_name: str) -> str:
-	return "\n".join(
-		[
-			LOCATIONS_BEGIN,
+def _location_block(path: str, bench_name: str) -> list[str]:
+	if path == "/mediamtx/":
+		return [
 			"location /mediamtx/ {",
 			"\tproxy_http_version 1.1;",
 			"\tproxy_set_header Host $host;",
@@ -220,20 +219,44 @@ def render_locations(bench_name: str) -> str:
 			"\tproxy_read_timeout 600s;",
 			f"\tproxy_pass http://{bench_name}-mediamtx/;",
 			"}",
-			"",
-			"location /domino-stream-socket.io {",
-			"\tproxy_http_version 1.1;",
-			"\tproxy_set_header Upgrade $http_upgrade;",
-			'\tproxy_set_header Connection "upgrade";',
-			"\tproxy_set_header X-Forwarded-For $remote_addr;",
-			"\tproxy_set_header X-Forwarded-Proto $scheme;",
-			"\tproxy_set_header X-Frappe-Site-Name $host;",
-			"\tproxy_set_header Origin $scheme://$http_host;",
-			"\tproxy_set_header Host $host;",
-			f"\tproxy_pass http://{bench_name}-domino-stream-io-server;",
-			"}",
-			LOCATIONS_END,
 		]
+	return [
+		"location /domino-stream-socket.io {",
+		"\tproxy_http_version 1.1;",
+		"\tproxy_set_header Upgrade $http_upgrade;",
+		'\tproxy_set_header Connection "upgrade";',
+		"\tproxy_set_header X-Forwarded-For $remote_addr;",
+		"\tproxy_set_header X-Forwarded-Proto $scheme;",
+		"\tproxy_set_header X-Frappe-Site-Name $host;",
+		"\tproxy_set_header Origin $scheme://$http_host;",
+		"\tproxy_set_header Host $host;",
+		f"\tproxy_pass http://{bench_name}-domino-stream-io-server;",
+		"}",
+	]
+
+
+LOCATION_PATHS = ("/mediamtx/", "/domino-stream-socket.io")
+
+
+def render_locations(bench_name: str, *, skip: tuple[str, ...] = ()) -> str:
+	"""Location block. ``skip`` names paths the file already proxies outside the markers."""
+	lines = [LOCATIONS_BEGIN]
+	for path in LOCATION_PATHS:
+		if path in skip:
+			continue
+		if len(lines) > 1:
+			lines.append("")
+		lines += _location_block(path, bench_name)
+	lines.append(LOCATIONS_END)
+	return "\n".join(lines)
+
+
+def _locations_outside_markers(text: str) -> tuple[str, ...]:
+	outside = _replace_marked(text, LOCATIONS_BEGIN, LOCATIONS_END, "") if LOCATIONS_BEGIN in text else text
+	return tuple(
+		path
+		for path in LOCATION_PATHS
+		if re.search(rf"^\s*location\s+{re.escape(path)}\s*\{{", outside, re.M)
 	)
 
 
@@ -251,7 +274,7 @@ def apply_nginx_config(
 	upstreams = render_upstreams(
 		bench_name, io_port, whip_port, skip=_upstreams_outside_markers(text, bench_name)
 	)
-	locations = render_locations(bench_name)
+	locations = render_locations(bench_name, skip=_locations_outside_markers(text))
 	if UPSTREAM_BEGIN in text:
 		text = _replace_marked(text, UPSTREAM_BEGIN, UPSTREAM_END, upstreams)
 	elif f"upstream {bench_name}-mediamtx " in text or f"upstream {bench_name}-mediamtx {{" in text:
