@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from contextlib import suppress
 
 import frappe
@@ -34,22 +35,53 @@ def _presence_token_cache_key(token: str) -> str:
 	return f"domino_stream_presence:{token}"
 
 
+def presence_token_hash(token: str) -> str:
+	return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+
+
 def issue_presence_token(table_id: str, session_id: str) -> str:
-	"""Short-lived token for Socket.IO presence auth (esp. remote DCMS → stream host)."""
+	"""Token for Socket.IO presence auth (esp. remote DCMS → stream host).
+
+	Kept in Redis for fast lookups, and its hash on the Stream Room so the socket
+	service's offline / keep_alive calls still authenticate if the Redis copy is gone
+	(otherwise an abandoned stream can never be challenged and stays Live).
+	"""
 	token = frappe.generate_hash(length=32)
 	frappe.cache().set_value(
 		_presence_token_cache_key(token),
 		{"table_id": table_id, "session_id": session_id},
 		expires_in_sec=PRESENCE_TOKEN_TTL_SECONDS,
 	)
+	room = frappe.db.get_value("Stream Room", {"table_id": table_id}, "name")
+	if room and frappe.db.has_column("Stream Room", "presence_token_hash"):
+		frappe.db.set_value(
+			"Stream Room", room, "presence_token_hash", presence_token_hash(token), update_modified=False
+		)
 	return token
 
 
+def _resolve_presence_token_from_room(token: str) -> dict | None:
+	if not frappe.db.has_column("Stream Room", "presence_token_hash"):
+		return None
+	row = frappe.db.get_value(
+		"Stream Room",
+		{"presence_token_hash": presence_token_hash(token)},
+		["table_id", "publisher_session_id"],
+		as_dict=True,
+	)
+	if not row or not row.table_id:
+		return None
+	return {"table_id": row.table_id, "session_id": row.publisher_session_id, "source": "room"}
+
+
 def resolve_presence_token(token: str) -> dict | None:
+	"""Identity for a presence token: Redis first, then the Stream Room's stored hash."""
 	if not token:
 		return None
 	data = frappe.cache().get_value(_presence_token_cache_key(token))
-	return data if isinstance(data, dict) else None
+	if isinstance(data, dict):
+		return data
+	return _resolve_presence_token_from_room(token)
 
 
 @frappe.whitelist(allow_guest=True)

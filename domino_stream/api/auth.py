@@ -72,6 +72,15 @@ def require_stream_access():
 		requested = _requested_table_id()
 		if data and (not requested or str(data.get("table_id") or "") == requested):
 			return
+		# Say why, so a stream that never ends can be traced (token unknown vs other table).
+		why = (
+			"unknown token (not in Redis, not on any Stream Room)"
+			if not data
+			else f"token is for table {data.get('table_id')}, request is for {requested}"
+		)
+		frappe.logger("domino_stream_auth", allow_site=True).warning(
+			"presence token refused: %s; method=%s", why, frappe.form_dict.get("cmd") or ""
+		)
 		frappe.throw(_("Invalid Domino Stream presence token"), frappe.AuthenticationError)
 
 	expected = get_inbound_api_key()
