@@ -177,18 +177,32 @@ def apply_procfile(text: str, block: str) -> str:
 	return block + "\n"
 
 
-def render_upstreams(bench_name: str, io_port: int = STREAM_IO_PORT) -> str:
-	return "\n".join(
-		[
-			UPSTREAM_BEGIN,
-			f"upstream {bench_name}-domino-stream-io-server {{",
-			f"\tserver 127.0.0.1:{io_port} fail_timeout=0;",
-			"}",
-			f"upstream {bench_name}-mediamtx {{",
-			f"\tserver 127.0.0.1:{MEDIAMTX_WHIP_PORT} fail_timeout=0;",
-			"}",
-			UPSTREAM_END,
-		]
+def render_upstreams(
+	bench_name: str,
+	io_port: int = STREAM_IO_PORT,
+	whip_port: int = MEDIAMTX_WHIP_PORT,
+	*,
+	skip: tuple[str, ...] = (),
+) -> str:
+	"""Upstream block. ``skip`` names upstreams the file already defines outside the markers."""
+	lines = [UPSTREAM_BEGIN]
+	for name, port in (
+		(f"{bench_name}-domino-stream-io-server", io_port),
+		(f"{bench_name}-mediamtx", whip_port),
+	):
+		if name in skip:
+			continue
+		lines += [f"upstream {name} {{", f"\tserver 127.0.0.1:{port} fail_timeout=0;", "}"]
+	lines.append(UPSTREAM_END)
+	return "\n".join(lines)
+
+
+def _upstreams_outside_markers(text: str, bench_name: str) -> tuple[str, ...]:
+	outside = _replace_marked(text, UPSTREAM_BEGIN, UPSTREAM_END, "") if UPSTREAM_BEGIN in text else text
+	return tuple(
+		name
+		for name in (f"{bench_name}-domino-stream-io-server", f"{bench_name}-mediamtx")
+		if re.search(rf"^\s*upstream\s+{re.escape(name)}\s*\{{", outside, re.M)
 	)
 
 
@@ -223,9 +237,20 @@ def render_locations(bench_name: str) -> str:
 	)
 
 
-def apply_nginx_config(text: str, bench_name: str, io_port: int = STREAM_IO_PORT) -> str:
-	"""Insert marker blocks. Leave an nginx file that already proxies these paths."""
-	upstreams = render_upstreams(bench_name, io_port)
+def apply_nginx_config(
+	text: str,
+	bench_name: str,
+	io_port: int = STREAM_IO_PORT,
+	whip_port: int = MEDIAMTX_WHIP_PORT,
+) -> str:
+	"""Insert marker blocks. Leave an nginx file that already proxies these paths.
+
+	An upstream the file already defines outside the markers is never added again
+	(nginx refuses duplicate upstreams).
+	"""
+	upstreams = render_upstreams(
+		bench_name, io_port, whip_port, skip=_upstreams_outside_markers(text, bench_name)
+	)
 	locations = render_locations(bench_name)
 	if UPSTREAM_BEGIN in text:
 		text = _replace_marked(text, UPSTREAM_BEGIN, UPSTREAM_END, upstreams)
@@ -503,11 +528,12 @@ def _wire_processes(root: Path, bench: Path, result: RuntimeResult) -> None:
 
 	nginx = bench / "config" / "nginx.conf"
 	io_port = _stream_io_port(bench)
+	whip_port = _mediamtx_whip_port(bench)
 	if not nginx.is_file():
 		result.notes.append("No config/nginx.conf yet. After bench setup nginx, run bench domino-stream-setup again.")
 		return
 	current_nginx = nginx.read_text(encoding="utf-8")
-	updated = apply_nginx_config(current_nginx, bench_name, io_port)
+	updated = apply_nginx_config(current_nginx, bench_name, io_port, whip_port)
 	if LOCATIONS_BEGIN not in updated and "location /mediamtx/" not in updated:
 		result.errors.append("Could not add Domino Stream locations to config/nginx.conf")
 		return
@@ -624,6 +650,13 @@ def _stream_io_port(bench: Path) -> int:
 		return int(raw)
 	except (TypeError, ValueError):
 		return STREAM_IO_PORT
+
+
+def _mediamtx_whip_port(bench: Path) -> int:
+	"""WHIP port of this bench's MediaMTX: site_config ``domino_mediamtx_whip`` (a URL) or 8889."""
+	raw = str(_read_common_config(bench).get("domino_mediamtx_whip") or "").strip()
+	match = re.search(r":(\d+)/?$", raw)
+	return int(match.group(1)) if match else MEDIAMTX_WHIP_PORT
 
 
 def _read_common_config(bench: Path) -> dict:

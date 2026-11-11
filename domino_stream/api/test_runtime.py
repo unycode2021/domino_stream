@@ -131,6 +131,19 @@ class TestRuntimeConfig(unittest.TestCase):
 		self.assertNotIn("location /mediamtx/", redirect)
 		self.assertIn("return 301", redirect)
 
+	def test_nginx_uses_this_bench_mediamtx_port(self):
+		out = apply_nginx_config(NGINX, "dev-bench", io_port=9013, whip_port=18889)
+		self.assertIn("upstream dev-bench-mediamtx {\n\tserver 127.0.0.1:18889", out)
+		self.assertNotIn(":8889 ", out)
+		self.assertEqual(out, apply_nginx_config(out, "dev-bench", io_port=9013, whip_port=18889))
+
+	def test_nginx_never_adds_an_upstream_the_file_already_has(self):
+		own = "upstream demo-domino-stream-io-server {\n\tserver 127.0.0.1:9003 fail_timeout=0;\n}\n" + NGINX
+		once = apply_nginx_config(own, "demo", io_port=9003)
+		self.assertEqual(once.count("upstream demo-domino-stream-io-server "), 1)
+		self.assertEqual(once.count("upstream demo-mediamtx "), 1)
+		self.assertEqual(once, apply_nginx_config(once, "demo", io_port=9003))
+
 	def test_hand_edited_nginx_is_left_in_place(self):
 		self.assertEqual(apply_nginx_config(HAND_EDITED_NGINX, "frappe-bench"), HAND_EDITED_NGINX)
 
