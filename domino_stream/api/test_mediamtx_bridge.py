@@ -300,6 +300,40 @@ class TestMediaMtxBridge(unittest.TestCase):
 			):
 				self.assertEqual(resolve_ffmpeg_bin(), str(system_bin))
 
+	def test_advertise_origin_skips_patch_when_host_already_set(self):
+		"""A PATCH restarts MediaMTX WebRTC and drops every live session."""
+		from domino_stream.api import mediamtx_bridge as bridge
+
+		class Resp:
+			def __init__(self, data):
+				self.ok = True
+				self._data = data
+
+			def json(self):
+				return self._data
+
+		calls = []
+
+		def fake_request(method, path, payload=None, node=None):
+			calls.append(method)
+			if method == "GET":
+				return Resp({"webrtcAdditionalHosts": ["dev.domino101.com"]})
+			return Resp({})
+
+		with patch.object(bridge, "_request", side_effect=fake_request):
+			bridge._advertise_origin("https://dev.domino101.com", None)
+		self.assertEqual(calls, ["GET"])
+
+		calls.clear()
+
+		def fake_request_empty(method, path, payload=None, node=None):
+			calls.append((method, payload))
+			return Resp({"webrtcAdditionalHosts": []} if method == "GET" else {})
+
+		with patch.object(bridge, "_request", side_effect=fake_request_empty):
+			bridge._advertise_origin("https://dev.domino101.com", None)
+		self.assertEqual(calls[-1], ("PATCH", {"webrtcAdditionalHosts": ["dev.domino101.com"]}))
+
 
 def _write_fake_ffmpeg(path: Path, text: str) -> None:
 	path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{text}'\n", encoding="utf-8")
