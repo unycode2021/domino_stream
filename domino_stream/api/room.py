@@ -1255,3 +1255,29 @@ def close_match_program_bridge(match_id, session_id=None):
 	from domino_stream.api.mediamtx_bridge import close_program_path
 
 	return close_program_path(match_id, session_id=session_id or "")
+
+
+@frappe.whitelist()
+def open_table_platform_path(table_id, public_origin=None):
+	"""WHIP/WHEP path on our MediaMTX for a Domino101 (Platform) table stream."""
+	require_stream_access()
+	from domino_stream.api.mediamtx_bridge import open_table_path
+
+	return open_table_path(table_id, public_origin or "")
+
+
+@frappe.whitelist()
+def close_table_platform_path(table_id):
+	require_stream_access()
+	from domino_stream.api.mediamtx_bridge import close_table_path
+
+	return close_table_path(table_id)
+
+
+@frappe.whitelist()
+def table_platform_path_status(table_id):
+	"""``ready`` when the table's MediaMTX path has a publisher; ``known`` false when unreadable."""
+	require_stream_access()
+	from domino_stream.api.mediamtx_bridge import table_path_status
+
+	return table_path_status(table_id)

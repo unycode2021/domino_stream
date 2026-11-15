@@ -197,6 +197,63 @@ class TestMediaMtxBridge(unittest.TestCase):
 		self.assertIsNone(mediamtx_upstream_path("/mediamtx/program-MCH00967-ab12/../whip"))
 		self.assertIsNone(mediamtx_upstream_path("/api/method/ping"))
 
+	def test_proxy_allows_table_paths_and_whep(self):
+		from domino_stream.api.mediamtx_bridge import mediamtx_upstream_path
+
+		self.assertEqual(
+			mediamtx_upstream_path("/mediamtx/table-TBL123-ab12/whip"),
+			"/table-TBL123-ab12/whip",
+		)
+		self.assertEqual(
+			mediamtx_upstream_path("/mediamtx/table-TBL123-ab12/whep/sess"),
+			"/table-TBL123-ab12/whep/sess",
+		)
+		self.assertEqual(
+			mediamtx_upstream_path("/mediamtx/program-MCH1-ab12/whep"),
+			"/program-MCH1-ab12/whep",
+		)
+		self.assertIsNone(mediamtx_upstream_path("/mediamtx/other-TBL123-ab12/whip"))
+		self.assertIsNone(mediamtx_upstream_path("/mediamtx/table-TBL123-ab12"))
+
+	def test_table_path_names(self):
+		from domino_stream.api.mediamtx_bridge import (
+			table_cache_key,
+			table_path_name,
+			table_path_prefix,
+			whep_public_url,
+		)
+
+		self.assertEqual(table_path_name("TBL-59/59", "ab12"), "table-TBL5959-ab12")
+		self.assertEqual(table_path_prefix("TBL-5959"), "table-TBL5959-")
+		self.assertEqual(table_cache_key("TBL-5959"), "mediamtx_table:TBL5959")
+		self.assertEqual(
+			whep_public_url("https://dev.domino101.com/", "table-TBL5959-ab12"),
+			"https://dev.domino101.com/mediamtx/table-TBL5959-ab12/whep",
+		)
+		with self.assertRaises(ValueError):
+			table_path_name("", "ab12")
+
+	def test_table_path_status_ready_and_unknown(self):
+		from domino_stream.api import mediamtx_bridge as bridge
+
+		class Nodes:
+			@staticmethod
+			def nodes_or_local():
+				return [{"mediamtx_api": "http://n1"}]
+
+		with patch.object(bridge, "_nodes", return_value=Nodes), patch.object(
+			bridge, "cached_table_path_name", return_value="table-T1-ab"
+		):
+			with patch.object(bridge, "_node_forwarding", return_value=True):
+				self.assertTrue(bridge.table_path_status("T1")["ready"])
+			with patch.object(bridge, "_node_forwarding", return_value=None):
+				state = bridge.table_path_status("T1")
+				self.assertFalse(state["ready"])
+				self.assertFalse(state["known"])
+			with patch.object(bridge, "_node_forwarding", return_value=False):
+				state = bridge.table_path_status("T1")
+				self.assertEqual((state["ready"], state["known"]), (False, True))
+
 	def test_session_paths_do_not_share_a_cache_key(self):
 		first = session_cache_key("MCH00967", "aaa111")
 		second = session_cache_key("MCH00967", "bbb222")
