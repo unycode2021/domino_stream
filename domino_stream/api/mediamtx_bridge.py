@@ -21,7 +21,10 @@ import requests
 # (``media_nodes``); these apply when no media agent has registered.
 API_BASE = "http://127.0.0.1:9997"
 WHIP_UPSTREAM = "http://127.0.0.1:8889"
-_WHIP_PROXY_RE = re.compile(r"^/mediamtx/(program-[A-Za-z0-9-]+)(/whip(?:/.*)?)?$")
+# Match Program (``program-``) and Domino101 / Platform table streams (``table-``).
+_WHIP_PROXY_RE = re.compile(
+	r"^/mediamtx/((?:program|table)-[A-Za-z0-9-]+)(/(?:whip|whep)(?:/.*)?)?$"
+)
 _PATH_TOKEN_BYTES = 16
 _REQUEST_TIMEOUT = 10
 _RTMP_URL_RE = re.compile(r"rtmps?://\S+", re.IGNORECASE)
@@ -242,8 +245,16 @@ def whip_public_url(origin: str, path_name: str) -> str:
 	return f"{base}/mediamtx/{name}/whip"
 
 
+def whep_public_url(origin: str, path_name: str) -> str:
+	base = (origin or "").strip().rstrip("/")
+	name = (path_name or "").strip().strip("/")
+	if not base or not name:
+		raise ValueError("origin and path are required")
+	return f"{base}/mediamtx/{name}/whep"
+
+
 def mediamtx_upstream_path(request_path: str) -> str | None:
-	"""Public /mediamtx/<path>/whip path, or None when the request must not be proxied."""
+	"""Public /mediamtx/<path>/whip|whep path, or None when the request must not be proxied."""
 	path = (request_path or "").split("?", 1)[0]
 	if not path or ".." in path:
 		return None
@@ -646,3 +657,146 @@ def close_program_path(match_id: str, session_id: str = "") -> dict:
 		"match_id": match_id,
 		"session_id": session,
 	}
+
+
+# --- Domino101 / Platform table streams -------------------------------------
+# Stream Host "Domino101" sends a table's publish and playback through our own
+# MediaMTX. One path per table, no forward (YouTube keeps its own relay).
+
+
+def table_path_name(table_id: str, token: str) -> str:
+	"""``table-<table>-<token>``. The token keeps the WHIP/WHEP URLs unguessable."""
+	safe = safe_match_id(table_id)
+	safe_token = re.sub(r"[^A-Za-z0-9]", "", token or "")
+	if not safe or not safe_token:
+		raise ValueError("table id and token are required")
+	return f"table-{safe}-{safe_token}"
+
+
+def table_path_prefix(table_id: str) -> str:
+	safe = safe_match_id(table_id)
+	if not safe:
+		raise ValueError("table id is required")
+	return f"table-{safe}-"
+
+
+def table_cache_key(table_id: str) -> str:
+	safe = safe_match_id(table_id)
+	if not safe:
+		raise ValueError("table id is required")
+	return f"mediamtx_table:{safe}"
+
+
+def cached_table_path_name(table_id: str) -> str:
+	try:
+		raw = _cache().get_value(table_cache_key(table_id), expires=True)
+	except Exception:
+		raw = None
+	if isinstance(raw, dict):
+		return (raw.get("path_name") or "").strip()
+	return ""
+
+
+def _table_path_names(table_id: str) -> list[tuple[str, dict]]:
+	"""(path name, node) for every configured path of this table, across nodes."""
+	prefix = table_path_prefix(table_id)
+	found = []
+	for node in _nodes().nodes_or_local():
+		response = _request("GET", "/v3/config/paths/list?itemsPerPage=100", node=node)
+		if response is None or not response.ok:
+			continue
+		try:
+			data = response.json()
+		except Exception:
+			continue
+		items = data.get("items") if isinstance(data, dict) else None
+		if not isinstance(items, list):
+			continue
+		for item in items:
+			if isinstance(item, dict):
+				name = (item.get("name") or "").strip()
+				if name.startswith(prefix):
+					found.append((name, node))
+	return found
+
+
+def close_table_path(table_id: str) -> dict:
+	"""Remove this table's MediaMTX path (cached one and any stale ones)."""
+	if not safe_match_id(table_id):
+		return {"success": True, "closed": False}
+	targets: list[tuple[str, dict | None]] = []
+	cached = cached_table_path_name(table_id)
+	if cached:
+		targets.append((cached, None))
+	try:
+		targets.extend(_table_path_names(table_id))
+	except Exception:
+		pass
+	seen = []
+	for name, node in targets:
+		if name and name not in seen:
+			seen.append(name)
+			_delete_path(name, node=node)
+	try:
+		_cache().delete_value(table_cache_key(table_id))
+	except Exception:
+		pass
+	return {"success": True, "closed": bool(seen), "table_id": table_id}
+
+
+def open_table_path(table_id: str, public_origin: str) -> dict:
+	"""Fresh publisher path for this table. Replaces the table's previous path."""
+	import frappe
+	from frappe import _
+
+	if not safe_match_id(table_id):
+		frappe.throw(_("Table is not loaded"))
+	close_table_path(table_id)
+	path_name = table_path_name(table_id, secrets.token_hex(_PATH_TOKEN_BYTES))
+	node = _nodes().pick_node()
+	response = _request(
+		"POST",
+		f"/v3/config/paths/add/{quote(path_name, safe='')}",
+		program_path_config(None),
+		node=node,
+	)
+	if response is None:
+		_throw_bridge_down()
+	if not response.ok:
+		_delete_path(path_name, node=node)
+		_throw_rejected()
+	_nodes().remember_path_node(path_name, node)
+	_cache().set_value(
+		table_cache_key(table_id),
+		{"path_name": path_name},
+		expires_in_sec=24 * 60 * 60,
+	)
+	_advertise_origin(public_origin, node)
+	return {
+		"success": True,
+		"table_id": table_id,
+		"path_name": path_name,
+		"whip_url": whip_public_url(public_origin, path_name),
+		"whep_url": whep_public_url(public_origin, path_name),
+	}
+
+
+def table_path_status(table_id: str) -> dict:
+	"""Whether this table's path has a live publisher.
+
+	``known`` is false when a node's path list cannot be read; callers must not
+	treat that as offline.
+	"""
+	path_name = cached_table_path_name(table_id)
+	try:
+		prefix = table_path_prefix(table_id)
+	except ValueError:
+		return {"known": True, "ready": False, "path_name": "", "table_id": table_id or ""}
+	known = True
+	for node in _nodes().nodes_or_local():
+		state = _node_forwarding(prefix, node)
+		if state:
+			return {"known": True, "ready": True, "path_name": path_name, "table_id": table_id}
+		if state is None:
+			known = False
+	return {"known": known, "ready": False, "path_name": path_name, "table_id": table_id}
