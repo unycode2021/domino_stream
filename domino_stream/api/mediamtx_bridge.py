@@ -475,12 +475,25 @@ def _cached_path_name(match_id: str, session_id: str = "") -> str:
 
 
 def _advertise_origin(origin: str, node: dict | None = None) -> None:
-	"""ICE host for a node without its own public host (single bench: the site host)."""
+	"""ICE host for a node without its own public host (single bench: the site host).
+
+	A global config patch restarts MediaMTX's WebRTC server, which drops every live
+	WHIP publisher and WHEP reader on that node. Patch only when the host is missing,
+	so going live on one table or program does not cut the others.
+	"""
 	if node and node.get("public_host"):
 		return
 	host = (urlparse(origin or "").hostname or "").strip()
 	if not host or host in ("localhost", "127.0.0.1", "::1"):
 		return
+	current = _request("GET", "/v3/config/global/get", node=node)
+	if current is not None and current.ok:
+		try:
+			hosts = (current.json() or {}).get("webrtcAdditionalHosts")
+		except ValueError:
+			hosts = None
+		if isinstance(hosts, list) and host in hosts:
+			return
 	_request("PATCH", "/v3/config/global/patch", {"webrtcAdditionalHosts": [host]}, node=node)
 
 
