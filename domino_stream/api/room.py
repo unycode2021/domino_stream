@@ -1281,3 +1281,69 @@ def table_platform_path_status(table_id):
 	from domino_stream.api.mediamtx_bridge import table_path_status
 
 	return table_path_status(table_id)
+
+
+# --- Extra outputs: station / partner feeds (stream_outputs) -----------------------
+
+
+def _stream_output_call(fn, *args, **kwargs):
+	from domino_stream.api.auth import require_output_access
+	from domino_stream.api.stream_outputs import OutputError
+
+	require_output_access()
+	try:
+		return fn(*args, **kwargs)
+	except OutputError as exc:
+		frappe.throw(_(str(exc)))
+
+
+@frappe.whitelist(methods=["POST"])
+def add_stream_output(
+	source_kind,
+	source_id,
+	mode,
+	name=None,
+	url=None,
+	stream_key=None,
+	profile="broadcast",
+	fps=30,
+	loudness=-23,
+	public_origin=None,
+):
+	"""Add a station feed to a Match Program (``program``) or a table stream (``table``).
+
+	``push`` sends to an RTMP / RTMPS / SRT ingest. ``pull`` returns an SRT address with
+	its own passphrase for the station to read. The push key is never returned.
+	"""
+	from domino_stream.api import stream_outputs
+
+	return _stream_output_call(
+		stream_outputs.add_output,
+		source_kind,
+		source_id,
+		mode,
+		name=name or "",
+		url=url or "",
+		stream_key=stream_key or "",
+		profile=profile or "broadcast",
+		fps=cint(fps) or 30,
+		loudness=cint(loudness) or -23,
+		public_origin=public_origin or "",
+	)
+
+
+@frappe.whitelist(methods=["POST"])
+def remove_stream_output(source_kind, source_id, output_id):
+	from domino_stream.api import stream_outputs
+
+	return _stream_output_call(stream_outputs.remove_output, source_kind, source_id, output_id)
+
+
+@frappe.whitelist()
+def list_stream_outputs(source_kind, source_id, public_origin=None):
+	"""Outputs with ``ready`` (FFmpeg path up) and, for pull, the station's SRT address."""
+	from domino_stream.api import stream_outputs
+
+	return _stream_output_call(
+		stream_outputs.list_outputs, source_kind, source_id, public_origin=public_origin or ""
+	)

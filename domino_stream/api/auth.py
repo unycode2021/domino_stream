@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hmac
+
 import frappe
 from frappe import _
 
@@ -106,4 +108,22 @@ def require_console_access():
 		frappe.throw(_("Login required"), frappe.PermissionError)
 	roles = set(frappe.get_roles(frappe.session.user))
 	if not roles.intersection(CONSOLE_ROLES):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+
+def require_output_access():
+	"""Extra outputs (station feeds): a console role, or the inbound API key.
+
+	Narrower than ``require_stream_access``: a presence token or a publisher grant
+	belongs to one table or recorder and must not send a match anywhere else.
+	"""
+	user = frappe.session.user
+	if user and user != "Guest" and set(frappe.get_roles(user)).intersection(CONSOLE_ROLES):
+		return
+	expected = get_inbound_api_key()
+	provided = (frappe.get_request_header("X-Domino-Stream-Key") or "").strip()
+	auth = (frappe.get_request_header("Authorization") or "").strip()
+	if auth.lower().startswith("bearer "):
+		provided = provided or auth[7:].strip()
+	if not expected or not provided or not hmac.compare_digest(provided, expected):
 		frappe.throw(_("Not permitted"), frappe.PermissionError)

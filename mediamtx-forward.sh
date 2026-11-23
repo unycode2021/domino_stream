@@ -11,7 +11,7 @@ mkdir -p "$(dirname "$log")"
 	printf '%s start\n' "$(date -Is)"
 } >>"$log"
 set +e
-"$@" 2>&1 | sed -E 's#rtmps?://[^[:space:]]+#rtmps://[redacted]#g' >>"$log"
+"$@" 2>&1 | sed -E -e 's#rtmps?://[^[:space:]]+#rtmps://[redacted]#g' -e 's#srt://[^[:space:]]+#srt://[redacted]#g' >>"$log"
 status=${PIPESTATUS[0]}
 {
 	printf 'wait status %s\n' "$status"
