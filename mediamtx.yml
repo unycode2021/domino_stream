@@ -1,5 +1,7 @@
 # MediaMTX v1.21.1 — WHIP in, RTMPS out for Match Program; WHIP/WHEP for
-# Domino101 (Platform) table streams (``table-`` paths).
+# Domino101 (Platform) table streams (``table-`` paths). Station feeds
+# (api/stream_outputs.py): ``out-`` paths re-encode a source; ``pull-`` paths are
+# read by a station over SRT with a per-path passphrase.
 # Binary: apps/domino_stream/bin/mediamtx
 # Browser signaling is proxied at /mediamtx/ . Media uses UDP 8189.
 
@@ -30,6 +32,9 @@ authInternalUsers:
         path: "~^(program|table)-"
       - action: playback
         path: "~^(program|table)-"
+      # Station feeds over SRT. Each pull path also needs its own srtReadPassphrase.
+      - action: read
+        path: "~^pull-[0-9a-f]{32}$"
   - user: any
     pass:
     ips: ["127.0.0.1", "::1"]
@@ -39,7 +44,7 @@ authInternalUsers:
       - action: pprof
       - action: read
       - action: publish
-        path: "~^(program|table)-"
+        path: "~^(program|table|pull)-"
 
 api: true
 apiAddress: 127.0.0.1:9997
@@ -55,7 +60,9 @@ rtspAddress: 127.0.0.1:8554
 
 rtmp: false
 hls: false
-srt: false
+# Station pull feeds. Open UDP 8890 on the public host (see README).
+srt: true
+srtAddress: :8890
 moq: false
 
 webrtc: true

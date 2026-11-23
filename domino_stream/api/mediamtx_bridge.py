@@ -28,6 +28,7 @@ _WHIP_PROXY_RE = re.compile(
 _PATH_TOKEN_BYTES = 16
 _REQUEST_TIMEOUT = 10
 _RTMP_URL_RE = re.compile(r"rtmps?://\S+", re.IGNORECASE)
+_SRT_URL_RE = re.compile(r"srt://\S+", re.IGNORECASE)
 
 
 def safe_match_id(match_id: str) -> str:
@@ -153,25 +154,13 @@ def resolve_ffmpeg_bin() -> str | None:
 FORWARD_VIDEO_BITRATE = "3500k"
 
 
-def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | None = "opus") -> str:
-	"""FFmpeg argv MediaMTX runs when the WHIP publisher is readable.
+def forward_input_args(ffmpeg_bin: str) -> list[str]:
+	"""Wrapper, FFmpeg and the input half of every forward: this path over local RTSP.
 
-	``$RTSP_PORT`` and ``$MTX_PATH`` are expanded by MediaMTX, not by a shell.
-	The first token is the wrapper, which logs FFmpeg's wait status. Video is
-	re-encoded to a 30 fps baseline 3500 kbit/s CBR on the wall clock, so a
-	dropped input frame is repeated instead of opening a hole in YouTube's
-	timeline. 3500 kbit/s sits above the browser's typical delivered rate and
-	leaves headroom on a lossy RTMP upload, where a lower congestion window
-	after a loss would otherwise block FFmpeg and make MediaMTX discard video.
-	Opus is resampled onto a monotonic clock before AAC. Interleave wait is
-	100 ms, so a timestamp glitch cannot park video frames. The probe is long
-	enough to see one keyframe. Mux delay stays at zero. ``nobuffer`` and
-	``genpts`` stay off. ``-thread_queue_size`` is not passed: the pinned
-	FFmpeg accepts it only as a muxer option and exits when it precedes ``-i``.
+	``$RTSP_PORT`` and ``$MTX_PATH`` are expanded by MediaMTX. Shared by the YouTube
+	owner forward and the extra outputs in ``stream_outputs``.
 	"""
-	if not push_url or not ffmpeg_bin:
-		raise ValueError("push url and ffmpeg are required")
-	parts = [
+	return [
 		forward_wrapper_path(),
 		ffmpeg_bin,
 		"-hide_banner",
@@ -193,6 +182,12 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 		"tcp",
 		"-i",
 		"rtsp://127.0.0.1:$RTSP_PORT/$MTX_PATH",
+	]
+
+
+def youtube_video_args() -> list[str]:
+	"""The owner forward's video encode: 30 fps baseline CBR at ``FORWARD_VIDEO_BITRATE``."""
+	return [
 		"-vf",
 		"fps=30,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
 		"-r",
@@ -221,6 +216,30 @@ def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | Non
 		FORWARD_VIDEO_BITRATE,
 		"-x264-params",
 		"nal-hrd=cbr:force-cfr=1",
+	]
+
+
+def build_forward_command(push_url: str, ffmpeg_bin: str, audio_codec: str | None = "opus") -> str:
+	"""FFmpeg argv MediaMTX runs when the WHIP publisher is readable.
+
+	``$RTSP_PORT`` and ``$MTX_PATH`` are expanded by MediaMTX, not by a shell.
+	The first token is the wrapper, which logs FFmpeg's wait status. Video is
+	re-encoded to a 30 fps baseline 3500 kbit/s CBR on the wall clock, so a
+	dropped input frame is repeated instead of opening a hole in YouTube's
+	timeline. 3500 kbit/s sits above the browser's typical delivered rate and
+	leaves headroom on a lossy RTMP upload, where a lower congestion window
+	after a loss would otherwise block FFmpeg and make MediaMTX discard video.
+	Opus is resampled onto a monotonic clock before AAC. Interleave wait is
+	100 ms, so a timestamp glitch cannot park video frames. The probe is long
+	enough to see one keyframe. Mux delay stays at zero. ``nobuffer`` and
+	``genpts`` stay off. ``-thread_queue_size`` is not passed: the pinned
+	FFmpeg accepts it only as a muxer option and exits when it precedes ``-i``.
+	"""
+	if not push_url or not ffmpeg_bin:
+		raise ValueError("push url and ffmpeg are required")
+	parts = [
+		*forward_input_args(ffmpeg_bin),
+		*youtube_video_args(),
 		*forward_audio_args(audio_codec),
 		"-f",
 		"flv",
@@ -270,7 +289,9 @@ def upstream_path_name(upstream_path: str) -> str:
 
 
 def scrub_rtmp_urls(text: str) -> str:
-	return _RTMP_URL_RE.sub("rtmps://[redacted]", text or "")
+	"""Hide push URLs (stream keys, SRT passphrases) before logging."""
+	text = _RTMP_URL_RE.sub("rtmps://[redacted]", text or "")
+	return _SRT_URL_RE.sub("srt://[redacted]", text)
 
 
 def safe_session_id(session_id: str) -> str:
@@ -497,6 +518,44 @@ def _advertise_origin(origin: str, node: dict | None = None) -> None:
 	_request("PATCH", "/v3/config/global/patch", {"webrtcAdditionalHosts": [host]}, node=node)
 
 
+def _outputs_follow(kind: str, source_id: str, path_name: str, node: dict | None) -> None:
+	"""Point this source's extra outputs (``stream_outputs``) at its new path.
+
+	Never fails the go-live: an output that cannot be opened is logged and retried
+	on the next go-live.
+	"""
+	try:
+		from domino_stream.api import stream_outputs
+
+		stream_outputs.follow_source(kind, source_id, path_name, node)
+	except Exception:
+		_log_output_error(kind, source_id)
+
+
+def _outputs_stop_if_source(kind: str, source_id: str, closed_paths: list[str]) -> None:
+	"""Stop the extra outputs when the path they read was one of the closed ones."""
+	if not closed_paths:
+		return
+	try:
+		from domino_stream.api import stream_outputs
+
+		stream_outputs.stop_if_source(kind, source_id, closed_paths)
+	except Exception:
+		_log_output_error(kind, source_id)
+
+
+def _log_output_error(kind: str, source_id: str) -> None:
+	try:
+		import frappe
+
+		frappe.log_error(
+			title=f"Stream outputs: {kind} {source_id}",
+			message=scrub_rtmp_urls(frappe.get_traceback()),
+		)
+	except Exception:
+		pass
+
+
 def open_program_path(
 	match_id: str,
 	rtmps_url: str,
@@ -550,6 +609,9 @@ def open_program_path(
 	_nodes().remember_path_node(path_name, node)
 	_store_path(match_id, path_name, session_id)
 	_advertise_origin(public_origin, node)
+	if forward:
+		# Station feeds and other extra outputs follow the owner's (new) path.
+		_outputs_follow("program", match_id, path_name, node)
 	return {
 		"success": True,
 		"match_id": match_id,
@@ -664,6 +726,7 @@ def close_program_path(match_id: str, session_id: str = "") -> dict:
 			seen.append(name)
 			_delete_path(name, node=node)
 	_drop_path(match_id, session)
+	_outputs_stop_if_source("program", match_id, seen)
 	return {
 		"success": True,
 		"closed": bool(seen),
@@ -754,6 +817,7 @@ def close_table_path(table_id: str) -> dict:
 		_cache().delete_value(table_cache_key(table_id))
 	except Exception:
 		pass
+	_outputs_stop_if_source("table", table_id, seen)
 	return {"success": True, "closed": bool(seen), "table_id": table_id}
 
 
@@ -785,6 +849,7 @@ def open_table_path(table_id: str, public_origin: str) -> dict:
 		expires_in_sec=24 * 60 * 60,
 	)
 	_advertise_origin(public_origin, node)
+	_outputs_follow("table", table_id, path_name, node)
 	return {
 		"success": True,
 		"table_id": table_id,
